@@ -262,21 +262,34 @@ Se complete: esegue auto-migrate idempotente (controlla `pg_tables` prima di CRE
 **Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`, `src/proxy.ts`
 **Scope:** M
 
-### T-102.b: Setup wizard — GitHub OAuth provider + OAuth App detection (follow-up)
-**Description:** estendere `src/lib/firstBoot.ts` e la pagina `/setup` per detectare e guidare il setup dei due pezzi mancati da T-102 originale:
-1. **Provider GitHub abilitato in Supabase Auth**: chiamata a Supabase Auth admin API (o GoTrue) via `SUPABASE_SERVICE_ROLE_KEY` per verificare lo state dei providers (`gotrue.config` o `/admin/providers`); se `github` non è `enabled`, render card con istruzioni + deep-link a Supabase Studio Auth → Providers.
-2. **OAuth App save2repo configurata**: se il provider GitHub è enabled ma `client_id` è vuoto/placeholder, render card "Create OAuth App save2repo on GitHub" con il template callback URL `https://<this-supabase-ref>.supabase.co/auth/v1/callback`.
+### T-102.b: Setup wizard — Supabase Auth misconfiguration detection (follow-up)
+**Description:** estendere `src/lib/firstBoot.ts` e la pagina `/setup` per detectare e guidare il setup dei pezzi mancati da T-102 originale, tutti emersi durante il primo showcase deploy (vedi README §"Auth setup smoke checklist"). Ogni gap deve avere una sua card nel wizard con istruzioni esplicite:
+
+1. **Provider GitHub abilitato in Supabase Auth.** Chiamata a Supabase Auth admin API (`/auth/v1/admin/...` o GoTrue config endpoint) con `SUPABASE_SERVICE_ROLE_KEY`. Se `github` non è `enabled`, render card "Enable GitHub provider in Supabase Auth" + deep-link a Supabase Studio Authentication → Providers. Sintomo runtime se mancante: `Unsupported provider: provider is not enabled`.
+
+2. **OAuth App save2repo credentials presenti.** Anche se il provider è enabled, il `client_id` salvato potrebbe essere placeholder o di un'altra OAuth App. Detection: se il provider è enabled ma il `client_id` non inizia per `Ov23` o è inferiore a 20 char, render card "Paste OAuth App save2repo credentials". Includere il callback URL template `https://<this-supabase-ref>.supabase.co/auth/v1/callback` da copiare nella OAuth App su GitHub.
+
+3. **Supabase Site URL non localhost.** Detection: query a Supabase Auth admin per leggere Site URL. Se contiene `localhost` o non matcha il deployment URL (`window.location.origin` lato client, oppure `NEXT_PUBLIC_APP_URL` se settato), render card "Set Site URL in Supabase Auth URL Configuration". Sintomo runtime se mancante: redirect post-login va a `http://localhost:3000/?code=...` invece del deployment URL.
+
+4. **Supabase Redirect URLs allowlist include deployment URL.** Se non c'è un pattern che matcha il deployment URL nei redirect URLs allowed, render card "Add deployment URL to Supabase Redirect URLs allowlist". Sintomo se mancante: fallback a Site URL durante OAuth callback.
+
+5. **GitHub App olonjs installation_id presente** in `owner_integrations`. Distinto dai 4 punti sopra: è la GitHub App server-to-server (ADR-006), non l'OAuth App user-login. Se mancante, render card "Install olonjs GitHub App" con link `https://github.com/apps/olonjs/installations/new`. Sintomo se mancante: "Create tenant" e save flow falliscono (T-106/T-108) appena reimplementati.
 
 **Acceptance:**
 - [ ] Provider disabled → wizard chiaro, no `Unsupported provider` runtime error mai più
-- [ ] Provider enabled ma config vuoto → wizard chiaro
-- [ ] Tutto OK → no card visibile
+- [ ] OAuth App credentials placeholder → wizard chiaro con il callback URL da registrare
+- [ ] Site URL = localhost → wizard chiaro con istruzioni Auth URL Configuration
+- [ ] Redirect URLs non include deployment URL → wizard chiaro
+- [ ] GitHub App olonjs non installed → card distinta con link install
+- [ ] Tutto OK → no card visibile, redirect a `/dashboard`
 **Verification:**
 - [ ] disable provider GitHub in Supabase Studio → reload `/setup` → card appare
-- [ ] re-enable + paste credentials → reload → card sparisce
+- [ ] revertire Site URL a localhost → reload → card appare
+- [ ] rimuovere domain dai Redirect URLs → reload → card appare
+- [ ] re-set tutto correttamente → reload → no card, redirect a dashboard
 **Dependencies:** T-102
 **Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`
-**Scope:** S
+**Scope:** M (era S, allargato dopo il debug session)
 
 ### T-103: Re-auth integrations Vercel OAuth
 **Description:** pagina `/settings/integrations` con "Connect Vercel"; callback `/auth/vercel/callback` salva `vercel_oauth_token` + `vercel_team_id` in `owner_integrations`. UI mostra "Connected: team X" + bottone disconnect/reconnect.

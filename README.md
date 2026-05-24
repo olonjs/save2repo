@@ -90,11 +90,57 @@ time:
    - Copy the resulting Client ID + Client Secret.
    - In Supabase Studio → Authentication → Providers → GitHub: enable the
      provider and paste the Client ID + Client Secret from the previous
-     bullet. Save.
-6. Visit the deployment URL; the first request triggers the auto-migrate
-   bootstrap (T-102) and then redirects to the GitHub login. The OAuth
-   consent screen must show "save2repo" (not "olonjs") — if it shows
-   "olonjs" your Supabase provider is still wired to the wrong OAuth App.
+     bullet. Save. **Double-check** that the Client ID saved actually
+     matches the one shown on the OAuth App page — copy/paste mistakes
+     here surface as `redirect_uri is not associated with this application`
+     at GitHub authorize time.
+6. **Supabase Auth URL Configuration** (one-time, often missed because it
+   defaults to localhost):
+   - Supabase Studio → Authentication → URL Configuration
+   - **Site URL**: set to your deployment URL, e.g.
+     `https://save2repo.vercel.app` (NOT `http://localhost:3000` — that's
+     the Supabase default and it's why OAuth callback redirects land on
+     localhost after authorize).
+   - **Redirect URLs** (allowlist): add `https://save2repo.vercel.app/**`
+     so the `signInWithOAuth({ redirectTo: ... })` passed by the client
+     is accepted (otherwise Supabase falls back to Site URL).
+   - Save.
+7. **Redeploy** save2repo on Vercel after every change to the
+   `NEXT_PUBLIC_SUPABASE_*` env vars: `NEXT_PUBLIC_*` are **bundled at
+   build time** into the client JS, so updating env in Vercel Settings
+   alone does nothing for the served bundle until the next deploy.
+   Deployments → ⋯ → Redeploy (uncheck "Use existing Build Cache" to be
+   safe).
+8. Visit the deployment URL; the middleware checks env (T-102) and either
+   sends you to `/setup` if anything is missing or to the login page. The
+   OAuth consent screen must show "save2repo" (not "olonjs") — if it
+   shows "olonjs" your Supabase provider is still wired to the wrong
+   OAuth App. After authorize you should land on `/dashboard`, not
+   `localhost:3000`.
+
+### Auth setup smoke checklist (recovery)
+
+If anything in the auth flow misbehaves, walk this list before debugging
+deeper:
+
+1. `https://save2repo.vercel.app/` → does it redirect to `/setup`?
+   - YES → env missing on Vercel project (step 3 above)
+   - NO → continue
+2. Click "Continue with GitHub" → DevTools Network tab → first request to
+   `github.com/login/oauth/authorize`. Inspect:
+   - `client_id` should match the Client ID of the OAuth App `save2repo`
+     (prefix `Ov23...`) and **not** the Client ID of GitHub App `olonjs`
+     (prefix `Iv1.` or `Iv23.`). If wrong → Supabase Auth provider is
+     wired to the wrong app (step 5).
+   - `redirect_uri` should be exactly
+     `https://<supabase-ref>.supabase.co/auth/v1/callback`. If GitHub
+     shows "redirect_uri is not associated with this application", the
+     OAuth App `save2repo`'s Authorization callback URL doesn't match
+     this string — fix in GitHub OAuth Apps settings.
+3. After authorize, do you land on `localhost:3000`?
+   - YES → Site URL or Redirect URLs allowlist not set on Supabase
+     (step 6).
+   - NO and land on `/dashboard` → all green.
 
 > **Local build on Windows + WSL** is known-broken because turbopack
 > mis-evaluates the UNC root path. Use the CI/Vercel Linux build instead
