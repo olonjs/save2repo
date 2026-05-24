@@ -10,6 +10,7 @@ import {
   resolveCorrelationId,
 } from '@/lib/customDomains';
 import { vercelGetDomainConfig, vercelGetDomainStatus, vercelRemoveDomain, vercelVerifyDomain } from '@/lib/vercelDomains';
+import { getOwnerVercelCreds, OwnerVercelCredsMissingError } from '@/lib/ownerVercelCreds';
 import { logDomain, metricDomain } from '@/lib/domainTelemetry';
 import { deriveDomainStatusFromVercel } from '@/lib/domainStatus';
 
@@ -73,8 +74,18 @@ export async function GET(
 
   const shouldVerify = req.nextUrl.searchParams.get('verify') !== '0';
 
+  let vercelCreds;
   try {
-    let vercelStatus = await vercelGetDomainStatus(access.data.tenant.vercel_project_id, domain);
+    vercelCreds = await getOwnerVercelCreds(auth.data.user.id);
+  } catch (err) {
+    if (err instanceof OwnerVercelCredsMissingError) {
+      return NextResponse.json({ error: err.message, code: err.code, correlationId }, { status: 409 });
+    }
+    throw err;
+  }
+
+  try {
+    let vercelStatus = await vercelGetDomainStatus(vercelCreds, access.data.tenant.vercel_project_id, domain);
     if (shouldVerify && !vercelStatus?.verified) {
       await appendDomainEvent({
         tenantId: params.id,
@@ -85,11 +96,11 @@ export async function GET(
         correlationId,
         payload: { domain },
       });
-      const verifyResponse = await vercelVerifyDomain(access.data.tenant.vercel_project_id, domain);
+      const verifyResponse = await vercelVerifyDomain(vercelCreds, access.data.tenant.vercel_project_id, domain);
       vercelStatus = { ...vercelStatus, verifyResponse };
     }
 
-    const vercelConfig = await vercelGetDomainConfig(access.data.tenant.vercel_project_id, domain).catch(() => null);
+    const vercelConfig = await vercelGetDomainConfig(vercelCreds, access.data.tenant.vercel_project_id, domain).catch(() => null);
     const providerPayload = { ...vercelStatus, config: vercelConfig };
     const verificationTargets = extractVerificationTargets({
       domain,
@@ -255,9 +266,19 @@ export async function DELETE(
     payload: { domain },
   });
 
+  let vercelCredsForRemove;
+  try {
+    vercelCredsForRemove = await getOwnerVercelCreds(auth.data.user.id);
+  } catch (err) {
+    if (err instanceof OwnerVercelCredsMissingError) {
+      return NextResponse.json({ error: err.message, code: err.code, correlationId }, { status: 409 });
+    }
+    throw err;
+  }
+
   try {
     if (access.data.tenant.vercel_project_id) {
-      await vercelRemoveDomain(access.data.tenant.vercel_project_id, domain);
+      await vercelRemoveDomain(vercelCredsForRemove, access.data.tenant.vercel_project_id, domain);
     }
   } catch (error: any) {
     const isNotFound = typeof error?.status === 'number' && error.status === 404;

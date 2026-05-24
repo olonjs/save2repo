@@ -12,6 +12,7 @@ import {
   resolveCorrelationId,
 } from '@/lib/customDomains';
 import { vercelAddDomain, vercelGetDomainConfig, vercelGetDomainStatus } from '@/lib/vercelDomains';
+import { getOwnerVercelCreds, OwnerVercelCredsMissingError } from '@/lib/ownerVercelCreds';
 import { logDomain, metricDomain } from '@/lib/domainTelemetry';
 import { deriveDomainStatusFromVercel } from '@/lib/domainStatus';
 
@@ -211,10 +212,20 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     payload: { domain },
   });
 
+  let vercelCreds;
   try {
-    await vercelAddDomain(access.data.tenant.vercel_project_id, domain);
-    const vercelStatus = await vercelGetDomainStatus(access.data.tenant.vercel_project_id, domain);
-    const vercelConfig = await vercelGetDomainConfig(access.data.tenant.vercel_project_id, domain).catch(() => null);
+    vercelCreds = await getOwnerVercelCreds(auth.data.user.id);
+  } catch (err) {
+    if (err instanceof OwnerVercelCredsMissingError) {
+      return NextResponse.json({ error: err.message, code: err.code, correlationId }, { status: 409 });
+    }
+    throw err;
+  }
+
+  try {
+    await vercelAddDomain(vercelCreds, access.data.tenant.vercel_project_id, domain);
+    const vercelStatus = await vercelGetDomainStatus(vercelCreds, access.data.tenant.vercel_project_id, domain);
+    const vercelConfig = await vercelGetDomainConfig(vercelCreds, access.data.tenant.vercel_project_id, domain).catch(() => null);
     const providerPayload = { ...vercelStatus, config: vercelConfig };
     const finalVerificationTargets = extractVerificationTargets({
       domain,

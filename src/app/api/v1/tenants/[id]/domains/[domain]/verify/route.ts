@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 import { requireRequestUser, assertTenantAccess } from '@/lib/serverAuth';
 import { appendDomainEvent, assertDomainGovernance, extractVerificationTargets, normalizeDomain, resolveCorrelationId } from '@/lib/customDomains';
 import { vercelGetDomainConfig, vercelGetDomainStatus, vercelVerifyDomain } from '@/lib/vercelDomains';
+import { getOwnerVercelCreds, OwnerVercelCredsMissingError } from '@/lib/ownerVercelCreds';
 import { logDomain, metricDomain } from '@/lib/domainTelemetry';
 import { deriveDomainStatusFromVercel } from '@/lib/domainStatus';
 
@@ -57,6 +58,16 @@ export async function POST(
     );
   }
 
+  let vercelCreds;
+  try {
+    vercelCreds = await getOwnerVercelCreds(auth.data.user.id);
+  } catch (err) {
+    if (err instanceof OwnerVercelCredsMissingError) {
+      return NextResponse.json({ error: err.message, code: err.code, correlationId }, { status: 409 });
+    }
+    throw err;
+  }
+
   await appendDomainEvent({
     tenantId: params.id,
     tenantDomainId: row.id,
@@ -68,9 +79,9 @@ export async function POST(
   });
 
   try {
-    const verifyPayload = await vercelVerifyDomain(access.data.tenant.vercel_project_id, domain);
-    const statusPayload = await vercelGetDomainStatus(access.data.tenant.vercel_project_id, domain);
-    const configPayload = await vercelGetDomainConfig(access.data.tenant.vercel_project_id, domain).catch(() => null);
+    const verifyPayload = await vercelVerifyDomain(vercelCreds, access.data.tenant.vercel_project_id, domain);
+    const statusPayload = await vercelGetDomainStatus(vercelCreds, access.data.tenant.vercel_project_id, domain);
+    const configPayload = await vercelGetDomainConfig(vercelCreds, access.data.tenant.vercel_project_id, domain).catch(() => null);
     const mergedPayload = { ...statusPayload, verifyPayload, config: configPayload };
     const verificationTargets = extractVerificationTargets({
       domain,

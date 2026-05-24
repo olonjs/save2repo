@@ -71,9 +71,15 @@ function mapVercelError(status: number, data: any): VercelDomainError {
   };
 }
 
-async function vercelFetch(path: string, init: RequestInit, retryOptions: RetryOptions = {}) {
-  const token = process.env.VERCEL_AUTH_TOKEN;
-  const teamId = process.env.VERCEL_TEAM_ID;
+export type VercelCreds = { token: string; teamId: string };
+
+async function vercelFetch(
+  creds: VercelCreds,
+  path: string,
+  init: RequestInit,
+  retryOptions: RetryOptions = {},
+) {
+  const { token, teamId } = creds;
   if (!token || !teamId) {
     throw <VercelDomainError>{
       status: 500,
@@ -145,33 +151,33 @@ async function vercelFetch(path: string, init: RequestInit, retryOptions: RetryO
   };
 }
 
-export async function vercelAddDomain(projectId: string, domain: string) {
-  return vercelFetch(`/v10/projects/${encodeURIComponent(projectId)}/domains`, {
+export async function vercelAddDomain(creds: VercelCreds, projectId: string, domain: string) {
+  return vercelFetch(creds, `/v10/projects/${encodeURIComponent(projectId)}/domains`, {
     method: 'POST',
     body: JSON.stringify({ name: domain }),
   });
 }
 
-export async function vercelGetDomainStatus(projectId: string, domain: string) {
-  return vercelFetch(`/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}`, {
+export async function vercelGetDomainStatus(creds: VercelCreds, projectId: string, domain: string) {
+  return vercelFetch(creds, `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}`, {
     method: 'GET',
   });
 }
 
-export async function vercelGetDomainConfig(projectId: string, domain: string) {
-  return vercelFetch(`/v6/domains/${encodeURIComponent(domain)}/config?projectId=${encodeURIComponent(projectId)}`, {
+export async function vercelGetDomainConfig(creds: VercelCreds, projectId: string, domain: string) {
+  return vercelFetch(creds, `/v6/domains/${encodeURIComponent(domain)}/config?projectId=${encodeURIComponent(projectId)}`, {
     method: 'GET',
   });
 }
 
-export async function vercelVerifyDomain(projectId: string, domain: string) {
-  return vercelFetch(`/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}/verify`, {
+export async function vercelVerifyDomain(creds: VercelCreds, projectId: string, domain: string) {
+  return vercelFetch(creds, `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}/verify`, {
     method: 'POST',
   });
 }
 
-export async function vercelRemoveDomain(projectId: string, domain: string) {
-  return vercelFetch(`/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}`, {
+export async function vercelRemoveDomain(creds: VercelCreds, projectId: string, domain: string) {
+  return vercelFetch(creds, `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}`, {
     method: 'DELETE',
   });
 }
