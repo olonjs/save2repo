@@ -213,10 +213,87 @@ CORS: solo origins `*.vercel.app` (i deployment buyer). Rate limit per deploymen
 **Files:** `jsonpages-platform/src/app/api/integrations/vercel/install/route.ts`, `jsonpages-platform/src/lib/marketplaceCallback.ts`
 **Scope:** M
 
+### T-A04: Spike — Supabase Auth config write strategy
+**Description:** verificare via test diretto su Supabase project freshly-created se le 4 scritture di configurazione Supabase Auth provider GitHub possono essere fatte programmaticamente dal nostro install callback senza intervento manuale del buyer. Le 4 scritture (vedi `rules_supabase_auth_setup_full_checklist.md`):
+1. Enable GitHub provider
+2. Set Client ID + Client Secret = credenziali OAuth App `save2repo` centralizzate ([T-A05](#t-a05-centralize-oauth-app-save2repo-credentials))
+3. Set Site URL = deployment URL save2repo del buyer
+4. Add deployment URL ai Redirect URLs allowlist
+
+**Candidati API:**
+- **Opzione A — GoTrue admin endpoint del project**, autenticato con `SUPABASE_SERVICE_ROLE_KEY` (project-level). Vantaggio: la key è già auto-iniettata da Supabase integration su Vercel ([ADR-007](../decisions/ADR-007-supabase-via-vercel-integration-guided-redirect.md)), nessun OAuth extra. Da verificare: GoTrue espone scrittura provider config + Site URL via SERVICE_ROLE_KEY?
+- **Opzione B — Supabase Management API** (`api.supabase.com/v1/projects/{ref}/config/auth`), autenticato con Supabase access token (account-level). Svantaggio: richiede Supabase OAuth nel install flow → **riapre [ADR-007](../decisions/ADR-007-supabase-via-vercel-integration-guided-redirect.md)** (che esplicitamente rigetta l'aggiungere Supabase OAuth).
+
+**Output:** `ADR-011-supabase-auth-config-write-strategy.md` con strategy scelta + script curl che applica i 4 cambi end-to-end su un project test, riproducibile.
+
+**Acceptance:**
+- [ ] 4 cambi applicabili e verificabili via Supabase Studio (rendering corretto in Authentication → Providers + URL Configuration)
+- [ ] login GitHub funzionante su project freshly-created interamente programmatico, senza UI manuale
+- [ ] ADR-011 scritto con decision: Opzione A o B + rationale + impatto su ADR-007 se B
+**Verification:**
+- [ ] eseguire lo script su un Supabase project test fresh, fare login GitHub: success
+**Dependencies:** None (può partire subito; blocca disegno T-A05/T-A06/T-202)
+**Files:** `docs/spikes/supabase-auth-admin-spike.md` (test transcript), `docs/decisions/ADR-011-supabase-auth-config-write-strategy.md`
+**Scope:** S
+**Critical path:** sì — risultato cambia design di T-A05, T-A06, T-202; se B, riapre anche ADR-007
+
+---
+
+### T-A05: Centralize OAuth App `save2repo` credentials
+**Description:** salvare Client ID + Client Secret della OAuth App GitHub `save2repo` ([ADR-009](../decisions/ADR-009-auth-github-oauth-hardcoded.md)) come secrets backend nel Vercel project di jsonpages-platform: env `SAVE2REPO_OAUTH_APP_CLIENT_ID` + `SAVE2REPO_OAUTH_APP_CLIENT_SECRET`. Accessibili solo dal callback handler [T-202](#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch) per essere pushate nel Supabase Auth del buyer durante l'install (modalità per [T-A04](#t-a04-spike--supabase-auth-config-write-strategy) outcome).
+
+Documentare nel README jsonpages-platform sezione "save2repo backend setup": dove vivono, come ruotarle, e che NON vanno mai esposte al frontend né committate in repo.
+
+**Acceptance:**
+- [ ] secrets registrate in Vercel jsonpages-platform (production env)
+- [ ] codepath T-202 le legge via `process.env.SAVE2REPO_OAUTH_APP_*`
+- [ ] README aggiornato con la sezione
+**Verification:**
+- [ ] grep nel repo non trova plaintext del Client Secret
+- [ ] T-202 può accederle (smoke test in dev contro env staging)
+**Dependencies:** None (in parallelo a T-A04)
+**Files:** `jsonpages-platform/.env.example` (placeholder), `jsonpages-platform/README.md`, env Vercel (config-only)
+**Scope:** XS
+
+---
+
+### T-A06: Bootstrap endpoint — seed data retrieval
+**Description:** nuovo endpoint `GET /api/v1/deployments/self/bootstrap` in jsonpages-platform. Bearer auth = `SAVE2REPO_DEPLOYMENT_TOKEN` (hash lookup in `save2repo_deployments`, stesso pattern T-A02). Risposta:
+
+```json
+{
+  "vercel_oauth_token": "...",
+  "vercel_team_id": "...",
+  "github_installation_id": 12345,
+  "supabase_auth_provider_configured": true
+}
+```
+
+Save2repo deployato chiama questo endpoint **al primo login post-install** (nuovo step in `firstBoot.ts` o `auth/callback/route.ts`) e popola `owner_integrations` nel buyer Supabase con i valori restituiti. Idempotente: chiamate successive ritornano gli stessi valori; consumer side è "scrivi-se-non-esiste".
+
+[T-202](#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch) popola questi valori in `save2repo_deployments` durante l'install callback. Richiede estensione schema [T-A01](#t-a01-tabella-save2repo_deployments--migration): ADD COLUMN `vercel_oauth_token_enc text`, `vercel_team_id text`, `supabase_auth_provider_configured bool default false` (il campo `github_installation_id bigint` è già nello schema iniziale).
+
+**Acceptance:**
+- [ ] endpoint 200 con dati validi + bearer corretto; 401 senza bearer; 403 per mismatch deployment ↔ token
+- [ ] save2repo deployato consumer scrive `owner_integrations` al primo login del buyer, idempotente
+- [ ] migration estende `save2repo_deployments`
+- [ ] vercel_oauth_token cifrato at-rest (pgsodium o equivalente)
+**Verification:**
+- [ ] smoke test E2E: simulare install (manual INSERT in `save2repo_deployments` con valori test) → login save2repo → verificare `owner_integrations` popolata
+**Dependencies:** T-A01 (estende), T-A02 (auth pattern riusato)
+**Files:**
+- jsonpages-platform: nuova migration `<timestamp>_save2repo_deployments_seed_columns.sql`, `src/app/api/v1/deployments/self/bootstrap/route.ts`, `src/lib/save2repoDeployments.ts` (extension)
+- save2repo: `src/lib/firstBoot.ts` (consumer), `src/app/auth/callback/route.ts` (trigger)
+**Scope:** M
+
+---
+
 ### Checkpoint Phase A
 - [ ] Endpoint token-signing raggiungibile da save2repo showcase
-- [ ] Tabella deployments funzionante
-- [ ] **smoke test:** save2repo showcase chiama `/github/installation-token` con un test deployment registrato → token GitHub valido ricevuto
+- [ ] Tabella deployments funzionante (incl. seed columns T-A06)
+- [ ] **smoke test 1:** save2repo showcase chiama `/github/installation-token` con un test deployment registrato → token GitHub valido ricevuto
+- [ ] **smoke test 2 (zero-touch readiness):** simulare install callback completo (manual INSERT in `save2repo_deployments` con seed data) → save2repo deployato consuma `/deployments/self/bootstrap` al primo login → `owner_integrations` popolata senza UI manuale
+- [ ] **spike T-A04 verde** (Supabase Auth Admin API path scelto, ADR-011 scritto): blocca Phase 2 design
 
 ---
 
@@ -225,10 +302,13 @@ CORS: solo origins `*.vercel.app` (i deployment buyer). Rate limit per deploymen
 ### T-101: Login GitHub OAuth + landing
 **Description:** pagina `/login` con bottone "Continue with GitHub" → `supabase.auth.signInWithOAuth({ provider: 'github' })`. Pagina `/auth/callback` gestisce session. Redirect `/dashboard` post-login.
 
-**Pre-requisito di setup (lato operator del showcase / buyer):**
-1. Creare una **OAuth App `save2repo` dedicata** su GitHub (settings/developers → New OAuth App) — vedi [ADR-009](../decisions/ADR-009-auth-github-oauth-hardcoded.md) "OAuth App dedicata vs GitHub App olonjs". **NON usare la GitHub App olonjs**: callback URL diverso + brand consent diverso.
-2. Callback URL della OAuth App = `https://<supabase-ref>.supabase.co/auth/v1/callback`.
-3. In Supabase Studio del project → Authentication → Providers → GitHub → Enable + paste Client ID + Client Secret della OAuth App save2repo.
+**Pre-requisito di setup:**
+
+- **Buyer path (Marketplace install):** automatico via [T-202](#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch) (usa credenziali OAuth App `save2repo` centralizzate [T-A05](#t-a05-centralize-oauth-app-save2repo-credentials) + scrittura provider Supabase Auth via strategy T-A04). Buyer non fa nulla.
+- **Showcase manual path (operator del nostro team Olon, una tantum):**
+  1. Creare una **OAuth App `save2repo` dedicata** su GitHub (settings/developers → New OAuth App) — vedi [ADR-009](../decisions/ADR-009-auth-github-oauth-hardcoded.md) "OAuth App dedicata vs GitHub App olonjs". **NON usare la GitHub App olonjs**: callback URL diverso + brand consent diverso.
+  2. Callback URL della OAuth App = `https://<supabase-ref>.supabase.co/auth/v1/callback`.
+  3. In Supabase Studio del project → Authentication → Providers → GitHub → Enable + paste Client ID + Client Secret della OAuth App save2repo.
 
 **Acceptance:**
 - [ ] click su "Continue with GitHub" → OAuth flow (consent screen mostra "save2repo") → session attiva → redirect dashboard
@@ -262,46 +342,29 @@ Se complete: esegue auto-migrate idempotente (controlla `pg_tables` prima di CRE
 **Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`, `src/proxy.ts`
 **Scope:** M
 
-### T-102.b: Setup wizard — Supabase Auth misconfiguration detection (follow-up)
-**Description:** estendere `src/lib/firstBoot.ts` e la pagina `/setup` per detectare e guidare il setup dei pezzi mancati da T-102 originale, tutti emersi durante il primo showcase deploy (vedi README §"Auth setup smoke checklist"). Ogni gap deve avere una sua card nel wizard con istruzioni esplicite:
+### T-102.b: ~~Setup wizard — Supabase Auth misconfiguration detection~~ (CANCELLED)
+**Status:** Cancelled — assorbito da [T-202](#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch). I 4 settings Supabase Auth (provider enable + OAuth App credentials + Site URL + Redirect URLs allowlist) vengono ora **configurati programmaticamente in modo deterministico** dall'install callback Marketplace, non detectati a wizard time. Il punto 5 (GitHub App olonjs installation_id) resta gestito da [T-204](#t-204-github-app-olonjs-install-detection--guided-redirect).
 
-1. **Provider GitHub abilitato in Supabase Auth.** Chiamata a Supabase Auth admin API (`/auth/v1/admin/...` o GoTrue config endpoint) con `SUPABASE_SERVICE_ROLE_KEY`. Se `github` non è `enabled`, render card "Enable GitHub provider in Supabase Auth" + deep-link a Supabase Studio Authentication → Providers. Sintomo runtime se mancante: `Unsupported provider: provider is not enabled`.
+**Rationale:** il piano "zero-touch install" (dashboard raggiungibile senza che il buyer setti nulla) richiede configurazione deterministica, non detection. Detection at first-boot wizard era follow-up scoperto dopo il primo showcase deploy manuale, ma per i buyer via Marketplace è obsoleto.
 
-2. **OAuth App save2repo credentials presenti.** Anche se il provider è enabled, il `client_id` salvato potrebbe essere placeholder o di un'altra OAuth App. Detection: se il provider è enabled ma il `client_id` non inizia per `Ov23` o è inferiore a 20 char, render card "Paste OAuth App save2repo credentials". Includere il callback URL template `https://<this-supabase-ref>.supabase.co/auth/v1/callback` da copiare nella OAuth App su GitHub.
+**Showcase manual deploy ([T-008](#t-008-setup-deploy-vercel-showcase)):** i 4 settings restano procedura one-time documentata nel README (sezione "Auth setup smoke checklist"), non in wizard interattivo.
 
-3. **Supabase Site URL non localhost.** Detection: query a Supabase Auth admin per leggere Site URL. Se contiene `localhost` o non matcha il deployment URL (`window.location.origin` lato client, oppure `NEXT_PUBLIC_APP_URL` se settato), render card "Set Site URL in Supabase Auth URL Configuration". Sintomo runtime se mancante: redirect post-login va a `http://localhost:3000/?code=...` invece del deployment URL.
+**Riferimenti:** `rules_supabase_auth_setup_full_checklist.md`, `rules_save2repo_oauth_app_separation.md`, [T-A04](#t-a04-spike--supabase-auth-config-write-strategy), [T-A05](#t-a05-centralize-oauth-app-save2repo-credentials), [T-A06](#t-a06-bootstrap-endpoint--seed-data-retrieval).
 
-4. **Supabase Redirect URLs allowlist include deployment URL.** Se non c'è un pattern che matcha il deployment URL nei redirect URLs allowed, render card "Add deployment URL to Supabase Redirect URLs allowlist". Sintomo se mancante: fallback a Site URL durante OAuth callback.
-
-5. **GitHub App olonjs installation_id presente** in `owner_integrations`. Distinto dai 4 punti sopra: è la GitHub App server-to-server (ADR-006), non l'OAuth App user-login. Se mancante, render card "Install olonjs GitHub App" con link `https://github.com/apps/olonjs/installations/new`. Sintomo se mancante: "Create tenant" e save flow falliscono (T-106/T-108) appena reimplementati.
+### T-103: Vercel integration UI — status + refresh-on-expiry
+**Description:** pagina `/settings/integrations` che mostra lo stato delle integration. **Happy path Marketplace:** install callback ([T-202](#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch)) ha già scritto `vercel_oauth_token` + `vercel_team_id` in `owner_integrations` via [T-A06](#t-a06-bootstrap-endpoint--seed-data-retrieval) (consumed al primo login). UI mostra "Connected: team X" + last refresh + bottone "Re-authenticate" che riapre Vercel OAuth solo se il token è scaduto/revocato. **Showcase manual path:** bottone "Connect Vercel" funziona come full OAuth ex novo (path legacy, single-owner showcase deploy).
 
 **Acceptance:**
-- [ ] Provider disabled → wizard chiaro, no `Unsupported provider` runtime error mai più
-- [ ] OAuth App credentials placeholder → wizard chiaro con il callback URL da registrare
-- [ ] Site URL = localhost → wizard chiaro con istruzioni Auth URL Configuration
-- [ ] Redirect URLs non include deployment URL → wizard chiaro
-- [ ] GitHub App olonjs non installed → card distinta con link install
-- [ ] Tutto OK → no card visibile, redirect a `/dashboard`
+- [ ] post-Marketplace-install: pagina mostra "Connected" senza che il buyer abbia cliccato nulla in dashboard
+- [ ] showcase manuale: "Connect Vercel" ex novo funziona
+- [ ] token scaduto/revocato → UI warning + CTA "Re-authenticate"
+- [ ] disconnect rimuove `owner_integrations` row (entrambe le path)
 **Verification:**
-- [ ] disable provider GitHub in Supabase Studio → reload `/setup` → card appare
-- [ ] revertire Site URL a localhost → reload → card appare
-- [ ] rimuovere domain dai Redirect URLs → reload → card appare
-- [ ] re-set tutto correttamente → reload → no card, redirect a dashboard
-**Dependencies:** T-102
-**Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`
-**Scope:** M (era S, allargato dopo il debug session)
-
-### T-103: Re-auth integrations Vercel OAuth
-**Description:** pagina `/settings/integrations` con "Connect Vercel"; callback `/auth/vercel/callback` salva `vercel_oauth_token` + `vercel_team_id` in `owner_integrations`. UI mostra "Connected: team X" + bottone disconnect/reconnect.
-**Acceptance:**
-- [ ] connect Vercel OAuth → token salvato encrypted
-- [ ] disconnect rimuove
-- [ ] reconnect funziona se token scade
-**Verification:**
-- [ ] manual E2E
-**Dependencies:** T-101
+- [ ] manual E2E Marketplace path: install → primo login → `/settings/integrations` mostra Connected senza interazioni
+- [ ] manual E2E showcase path: connect from scratch via UI
+**Dependencies:** T-101, T-A06 (per Marketplace path; showcase path indipendente)
 **Files:** `src/app/settings/integrations/page.tsx`, `src/app/auth/vercel/callback/route.ts`, `src/lib/vercelAuth.ts`
-**Scope:** M
+**Scope:** S (era M; ridotto perché happy path è auto-popolato via T-A06)
 
 ### T-104: Token-signing client (Octokit wrapper)
 **Description:** lib `githubAppClient.ts` con `getInstallationOctokit(installationId): Promise<Octokit>`:
@@ -452,23 +515,37 @@ Error UX: se endpoint down → error chiaro "olonjs backend unreachable, try aga
 **Files:** nessuno (config-only)
 **Scope:** S
 
-### T-202: Marketplace callback handler — provisioning logic
-**Description:** estendi T-A03 con la logica provisioning vera:
-1. Token-signing per ottenere installation token GitHub olonjs sul GitHub del buyer (verifica installation_id risolvendo da `teamId` ↔ buyer GitHub account — strategy: GitHub OAuth additional o richiedere installation come step separato T-204)
-2. Fork repo `save2repo` pubblico nel GitHub del buyer (via `POST /repos/{owner}/{repo}/forks`)
-3. Create project Vercel nel team buyer via Vercel access token (T-A03) con `gitRepository` puntato al fork
-4. Inietta env vars (Supabase URL/keys da T-203, `SAVE2REPO_DEPLOYMENT_TOKEN` = registration token, `OLONJS_API_BASE`)
-5. Trigger deploy + wait READY
-6. Redirect a welcome screen del save2repo deployato
+### T-202: Marketplace callback handler — provisioning logic (full zero-touch)
+**Description:** estendi T-A03 con la logica provisioning end-to-end. **Obiettivo "zero-touch":** il buyer atterra sulla dashboard save2repo senza settare NULLA dopo il click "Install" sul Marketplace, a parte i consent inevitabili per platform security (GitHub App olonjs install, Supabase install se mancante, primo "Continue with GitHub" sul deploy save2repo).
+
+Steps del callback (state machine con resume tokens per gestire i redirect intermedi):
+1. **Exchange `code`** per Vercel access token (Marketplace Provider API) — già in [T-A03](#t-a03-marketplace-install-callback-handler-skeleton)
+2. **Supabase detection/redirect** ([T-203](#t-203-supabase-integration-detection--guided-redirect)) — se Supabase integration non installata nel team → redirect to install, resume
+3. **GitHub OAuth additional** per identità buyer + risoluzione `installation_id` GitHub App olonjs
+4. **GitHub App olonjs detection/redirect** ([T-204](#t-204-github-app-olonjs-install-detection--guided-redirect)) — se installation mancante → redirect a install GitHub App, resume
+5. **Fork repo `save2repo`** pubblico nel GitHub del buyer (via `POST /repos/{template}/generate` o `/forks`)
+6. **Create project Vercel** nel team buyer con `gitRepository` puntato al fork
+7. **Inject env vars Vercel project** del save2repo del buyer: Supabase URL/keys (read-back da Vercel project env post-Supabase auto-inject), `SAVE2REPO_DEPLOYMENT_TOKEN` (registration token T-A03), `OLONJS_API_BASE`
+8. **Configura Supabase Auth provider del buyer** (4 scritture; strategy concreta dipende da [T-A04](#t-a04-spike--supabase-auth-config-write-strategy) outcome, Opzione A o B):
+   - enable GitHub provider
+   - paste Client ID + Secret = OAuth App `save2repo` centralizzate ([T-A05](#t-a05-centralize-oauth-app-save2repo-credentials))
+   - Site URL = deployment URL save2repo del buyer
+   - add deployment URL ai Redirect URLs allowlist
+9. **Stash seed data in `save2repo_deployments`** per consumo via [T-A06](#t-a06-bootstrap-endpoint--seed-data-retrieval) al primo login del buyer: `vercel_oauth_token` (encrypted), `vercel_team_id`, `github_installation_id`, `supabase_auth_provider_configured = true`
+10. **Trigger deploy** + wait READY
+11. **Redirect** al deployment buyer `/welcome` ([T-206](#t-206-welcome-screen-post-install-save2repo))
 
 **Acceptance:**
-- [ ] end-to-end install da Marketplace produce save2repo deployato funzionante
-- [ ] errori intermedi propagati con context
+- [ ] end-to-end install da Marketplace → buyer atterra a dashboard save2repo funzionante senza settare nulla in form (consent OAuth/install esclusi: GitHub App olonjs, Supabase se mancante, primo "Continue with GitHub")
+- [ ] tutti gli step ≥2 con stato persistente per gestire redirect Supabase + GitHub App
+- [ ] errori intermedi propagati con context al welcome screen (T-206 + T-207)
+- [ ] Supabase Auth del buyer interamente configurato programmaticamente (no Studio click manuali)
 **Verification:**
-- [ ] install staging integration su test team → verificare project Vercel + repo GitHub esistono e deploy READY
-**Dependencies:** T-A03, T-201, T-104, T-A02
-**Files:** `jsonpages-platform/src/app/api/integrations/vercel/install/route.ts` (extension), `jsonpages-platform/src/lib/save2repoProvisioning.ts`
-**Scope:** M
+- [ ] install staging integration su test team **senza Supabase pre-installato + senza GitHub App olonjs pre-installato** → completare redirect chain → verificare deploy READY + login GitHub immediato + dashboard accessibile
+- [ ] `/settings/integrations` mostra Vercel "Connected" senza click manuale
+**Dependencies:** T-A02, T-A03, T-A04, T-A05, T-A06, T-201, T-104
+**Files:** `jsonpages-platform/src/app/api/integrations/vercel/install/route.ts` (major extension), `jsonpages-platform/src/lib/save2repoProvisioning.ts` (orchestration state machine), `jsonpages-platform/src/lib/supabaseAuthAdmin.ts` (nuova lib per le 4 scritture provider config)
+**Scope:** M (orchestrazione 11 step + state machine resume; resta M ma con sub-task interni espliciti)
 
 ### T-203: Supabase integration detection + guided redirect
 **Description:** nel callback handler T-202, dopo create project:
@@ -622,13 +699,13 @@ Riferimento [vercel/example-marketplace-integration](https://github.com/vercel/e
 | Phase | XS | S | M | Total |
 |---|---|---|---|---|
 | Phase 0 | 1 | 2 | 5 | 8 |
-| Phase A | 0 | 1 | 2 | 3 |
-| Phase 1 | 0 | 3 | 9 | 12 |
+| Phase A | 1 | 2 | 3 | 6 |
+| Phase 1 | 0 | 4 | 8 | 12 |
 | Phase 2 | 0 | 2 | 5 | 7 |
 | Phase 3 | 1 | 2 | 2 | 5 |
-| **TOT** | **2** | **10** | **23** | **35** |
+| **TOT** | **3** | **12** | **23** | **38** |
 
-(Conteggio 35 incluso checkpoint formali; task effettivi 31.)
+(Conteggio 38 incluso checkpoint formali; task effettivi 34. T-102.b cancellato — assorbito in T-202. T-103 ridotto da M a S — happy path auto-popolato via T-A06.)
 
 ## Verification pre-implementation (skill checklist)
 - [x] Ogni task ha acceptance criteria

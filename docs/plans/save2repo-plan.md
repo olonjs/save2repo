@@ -6,9 +6,11 @@ Forkare jsonpages-platform in `save2repo` (history clean-start), ripulirlo dai p
 
 ## Architecture decisions (riferimento ADR)
 
-Tutte chiuse — vedi [`docs/decisions/`](../decisions/README.md) per dettagli.
+ADR-001..010 chiuse — vedi [`docs/decisions/`](../decisions/README.md) per dettagli.
 
 - ADR-001 fork + clean history · ADR-002 single-owner · ADR-003 Native Integration + subscription · ADR-004 BUSL 1.1 pubblico · ADR-005 save2repo only · ADR-006 GitHub App olonjs condivisa · ADR-007 Supabase Marketplace + redirect guidato · ADR-008 custom domains via Vercel API · ADR-009 GitHub OAuth hardcoded · ADR-010 template `olonjs/*` esterni
+
+ADR-011 (Supabase Auth config write strategy): **pending** — output di [T-A04 spike](save2repo-tasks.md#t-a04-spike--supabase-auth-config-write-strategy); decide Opzione A (GoTrue admin + SERVICE_ROLE_KEY) o Opzione B (Management API + Supabase OAuth, riapre ADR-007).
 
 ## Dependency graph (macro)
 
@@ -39,7 +41,7 @@ repo setup & pulizia         GitHub token-signing endpoint
 Dir save2repo ha codice forkato dal parent, pulito, builds/lints/tsc verdi, primo deploy Vercel mock funzionante.
 
 ### Phase A — Cross-project deps in jsonpages-platform (parallelo a 0/1)
-Infrastruttura olonjs backend pronta a servire i deployment save2repo: token-signing endpoint, registry deployment, callback skeleton.
+Infrastruttura olonjs backend pronta a servire i deployment save2repo: token-signing endpoint, registry deployment, callback skeleton, **spike Supabase Auth config write strategy (blocking)**, OAuth App `save2repo` credenziali centralizzate, bootstrap endpoint per seed data retrieval al primo login. Obiettivo end-state: zero-touch install dal Marketplace (buyer non setta nulla, solo consent OAuth/install inevitabili).
 
 ### Phase 1 — Use funnel (save2repo)
 save2repo deployato (manualmente in Phase 0) permette al single-owner di completare l'intero use funnel: auth → re-auth integrations → crea tenant → editor o MCP → save → tenant live → custom domain.
@@ -56,6 +58,7 @@ Listing pubblico vivo + 3 inviti esterni testano l'install end-to-end.
 |---|---|---|
 | Vercel approval lenta (settimane) | Alto su timeline | Iniziare submission materials in Phase 2, non aspettare Phase 3 |
 | GitHub installation-token endpoint instabile = downtime per tutti i deployment | Critico (single point of failure) | SLA chiaro nel readme buyer; status page; retry + jitter; multi-region deploy nostro backend |
+| **Supabase Auth provider config non scrivibile via SERVICE_ROLE_KEY (solo Management API)** | **Critico per zero-touch** (riaprirebbe ADR-007 + costringerebbe Supabase OAuth nel install flow) | **Spike anticipato T-A04 in Phase A** (blocca disegno T-202); ADR-011 documenta strategy scelta + fallback |
 | Programmatic install Supabase/GitHub via API non fattibile | Medio (UX = +1 click extra) | Spike anticipato in Phase 2 (T-203/T-204); fallback redirect guidato già pianificato |
 | Native billing setup mai fatto | Medio | Spike isolato + esempio Vercel come scaffold |
 | MCP non funziona day-1 | Critico (è il moat) | Smoke test E2E (Claude esterno → MCP → save) come checkpoint blocking di Phase 1 (T-110) |
@@ -64,10 +67,11 @@ Listing pubblico vivo + 3 inviti esterni testano l'install end-to-end.
 
 ## Parallelization rules
 
-- **Sequenziale:** Phase 0 → Phase 1; Phase A → blocking di T-106/T-108/T-110; Phase 2 → Phase 3
-- **Parallelo:** Phase A può iniziare con Phase 0 (sessione separata); listing materials T-301 possono iniziare durante Phase 2
-- **Coordinazione contratto:** Phase A endpoint shape ↔ Phase 1 T-104 client — definire shape request/response prima di parallelizzare
+- **Sequenziale:** Phase 0 → Phase 1; Phase A → blocking di T-106/T-108/T-110/T-202; Phase 2 → Phase 3
+- **Sequenziale interno a Phase A:** T-A04 (spike Supabase Auth) blocca disegno T-A05/T-A06/T-202 — è critical path; parte per primo
+- **Parallelo:** Phase A può iniziare con Phase 0 (sessione separata); T-A05 e T-A06 in parallelo dopo T-A04; listing materials T-301 possono iniziare durante Phase 2
+- **Coordinazione contratto:** Phase A endpoint shape ↔ Phase 1 T-104 client / Phase 1 T-103 consumer di T-A06 — definire shape request/response prima di parallelizzare
 
 ## Tasks granulari
 
-Vedi [save2repo-tasks.md](save2repo-tasks.md) per la decomposizione completa in 31 task.
+Vedi [save2repo-tasks.md](save2repo-tasks.md) per la decomposizione completa in 34 task.
