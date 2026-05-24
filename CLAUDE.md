@@ -12,13 +12,35 @@ Next.js 16 (App Router) · React 18 · TypeScript strict · Tailwind · Supabase
 
 **Preservato come moat:** MCP gateway + admin keypair signing · A2A + webMCP · provision-stream SSE pattern (dispatcher su `deployment_target = client_vercel`) · template tenant ecosystem `olonjs/*` (esterno al repo, fetched via GitHub API).
 
-## Build & lint (solo WSL)
+## Dependencies, build & lint
+
+Da WSL nativo (`dev@Studio:~/save2repo$`):
 
 ```bash
-wsl -d Ubuntu --cd /home/dev/save2repo bash -lc "npm run build"
-wsl -d Ubuntu --cd /home/dev/save2repo bash -lc "npm run lint"
-wsl -d Ubuntu --cd /home/dev/save2repo bash -lc "npx tsc --noEmit"
+npm install --ignore-scripts        # vedi gotcha sotto
+chmod +x node_modules/.bin/*        # vedi gotcha sotto
+npm run dev                          # next dev
+npm run build
+npm run lint
+npx tsc --noEmit
 ```
+
+**Gotcha — npm install via Windows hand-off:** quando `npm install` viene
+eseguito attraverso il bridge Windows ↔ WSL (es. un agente che chiama
+`wsl -d Ubuntu bash -lc "npm install"` dalla CWD Windows), succedono due cose:
+
+1. Il `supabase` package ha un postinstall che invoca `cmd.exe` con la CWD su
+   UNC path (`\\wsl.localhost\...`), e cmd.exe non supporta UNC → l'install
+   fallisce con `ERR_INVALID_URL`. Mitigation: **sempre `--ignore-scripts`**.
+   Il binary `supabase` CLI non serve a runtime; chi lo vuole se lo installa
+   a parte.
+2. I wrapper POSIX in `node_modules/.bin/` vengono scritti con permission
+   `644` (no execute bit) perché Windows npm non setta il flag eseguibile sul
+   filesystem WSL. Risultato: `npm run dev` ritorna `sh: 1: next: Permission
+   denied`. Mitigation: **`chmod +x node_modules/.bin/*` post-install**.
+
+Eseguendo l'install da WSL nativo con npm nativo Linux (nvm/apt) entrambi i
+problemi spariscono — il bridge Windows è la causa.
 
 ## Implementation plan
 
