@@ -10,6 +10,7 @@ import {
   Rocket,
   X,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 // ----------------------------------------------------------------------------
 // CreateTenantModal (T-105)
@@ -123,9 +124,21 @@ export function CreateTenantModal({ onClose, onComplete }: CreateTenantModalProp
     abortRef.current = controller;
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setStreamError("Session expired. Please reload and sign in again.");
+        setStreaming(false);
+        return;
+      }
       const res = await fetch("/api/v1/tenants/provision-stream", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           template: { owner: selectedTemplate.owner, repo: selectedTemplate.repo },
           slug,
