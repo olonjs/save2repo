@@ -36,8 +36,8 @@ const AUTOSAVE_DEBOUNCE_MS = 8000;
 type SaveStatus =
   | { state: "idle" }
   | { state: "loading" }
-  | { state: "saving" }
-  | { state: "saved"; at: number }
+  | { state: "saving"; step?: string; logs: string[] }
+  | { state: "saved"; at: number; liveUrl: string | null }
   | { state: "error"; message: string };
 
 export default function EditPage() {
@@ -103,9 +103,9 @@ export default function EditPage() {
     };
   }, [tenantId, path, authHeaders]);
 
-  // ----- Save -----
+  // ----- Save (T-108 SSE: commit → rebuild → live) -----
   const save = useCallback(async () => {
-    setStatus({ state: "saving" });
+    setStatus({ state: "saving", logs: [] });
     const headers = await authHeaders();
     if (!headers) {
       setStatus({ state: "error", message: "Not authenticated" });
@@ -113,21 +113,59 @@ export default function EditPage() {
     }
     try {
       const res = await fetch(
-        `/api/v1/tenants/${tenantId}/content?path=${encodeURIComponent(path)}`,
+        `/api/v1/tenants/${tenantId}/save-stream`,
         {
-          method: "PUT",
+          method: "POST",
           headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ content, sha: sha ?? undefined }),
+          body: JSON.stringify({ path, content, sha: sha ?? undefined }),
         },
       );
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus({ state: "error", message: data?.error ?? `HTTP ${res.status}` });
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => "");
+        setStatus({ state: "error", message: `save-stream ${res.status}: ${text.slice(0, 200)}` });
         return;
       }
-      setSha(typeof data.sha === "string" ? data.sha : sha);
-      setDirty(false);
-      setStatus({ state: "saved", at: Date.now() });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const logs: string[] = [];
+      let currentStep: string | undefined;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split(/\n\n/);
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const line = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          let event: { type: string; [k: string]: unknown };
+          try {
+            event = JSON.parse(line.slice(5).trim());
+          } catch {
+            continue;
+          }
+          if (event.type === "step" && typeof event.label === "string") {
+            currentStep = event.label;
+            setStatus({ state: "saving", step: currentStep, logs: [...logs] });
+          } else if (event.type === "log" && typeof event.message === "string") {
+            logs.push(event.message);
+            setStatus({ state: "saving", step: currentStep, logs: [...logs] });
+          } else if (event.type === "error") {
+            const code = typeof event.code === "string" ? event.code : "ERR";
+            const msg = typeof event.message === "string" ? event.message : "Save failed";
+            setStatus({ state: "error", message: `${code}: ${msg}` });
+            return;
+          } else if (event.type === "done") {
+            const newSha = typeof event.sha === "string" ? event.sha : sha;
+            const liveUrl = typeof event.liveUrl === "string" ? event.liveUrl : null;
+            setSha(newSha);
+            setDirty(false);
+            setStatus({ state: "saved", at: Date.now(), liveUrl });
+            return;
+          }
+        }
+      }
     } catch (err) {
       setStatus({ state: "error", message: err instanceof Error ? err.message : "Save failed" });
     }
@@ -221,11 +259,48 @@ function StatusLine({ status, dirty }: { status: SaveStatus; dirty: boolean }) {
       </div>
     );
   }
+  if (status.state === "saving") {
+    return (
+      <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3 text-xs">
+        <div className="flex items-center gap-2 text-foreground">
+          <Loader2 size={14} className="animate-spin" />
+          <span>{status.step ?? "Saving…"}</span>
+        </div>
+        {status.logs.length > 0 ? (
+          <details>
+            <summary className="cursor-pointer text-muted-foreground">
+              Logs ({status.logs.length})
+            </summary>
+            <pre className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {status.logs.join("\n")}
+            </pre>
+          </details>
+        ) : null}
+      </div>
+    );
+  }
   if (status.state === "saved") {
     return (
       <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-300">
-        <Check size={14} /> Saved at {new Date(status.at).toLocaleTimeString()}. Vercel
-        will rebuild in ~30s.
+        <Check size={14} />
+        Saved at {new Date(status.at).toLocaleTimeString()}. Site live
+        {status.liveUrl ? (
+          <>
+            {" "}
+            at{" "}
+            <a
+              href={status.liveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              {status.liveUrl}
+            </a>
+            .
+          </>
+        ) : (
+          " (URL not resolved)."
+        )}
       </p>
     );
   }
