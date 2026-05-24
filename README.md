@@ -40,9 +40,9 @@ The product spec is in [`docs/specs/save2repo.md`](docs/specs/save2repo.md).
 ## Development
 
 ```bash
-npm install
-cp .env.example .env.local       # fill the values
-npm run dev                      # next dev on port 3000
+npm install --ignore-scripts       # supabase CLI postinstall is UNC-incompatible
+cp .env.example .env.local         # fill the values
+npm run dev                        # next dev on port 3000
 npm run lint
 npm run build
 npm run type-check
@@ -50,6 +50,40 @@ npm run type-check
 
 See [CLAUDE.md](CLAUDE.md) for the project conventions an AI agent should
 follow.
+
+## Deploying the showcase (Phase 0)
+
+For the public showcase deployment we run from our own team — the
+Marketplace install flow (Phase 2) is its own thing. To set it up the first
+time:
+
+1. **Supabase test project**: create a new project in the Olon Supabase org.
+   Enable the `pgsodium` and `pgcrypto` extensions (Database → Extensions),
+   then apply `supabase/migrations/00000000000000_save2repo_baseline.sql`
+   via the Supabase SQL editor or `supabase db push`.
+2. **Vercel project**: push this branch to GitHub (`git push -u origin main`),
+   then `vercel link` (Olon team) and `vercel --prod` for the first deploy.
+   Subsequent pushes to `main` deploy automatically via the
+   `git.deploymentEnabled.main` setting in `vercel.json`.
+3. **Env vars on the Vercel project** (Settings → Environment Variables,
+   "Production" scope unless noted):
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+     `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` — auto-injected if you
+     add the [Supabase Marketplace integration](https://vercel.com/integrations/supabase),
+     otherwise paste from the Supabase project Settings → API
+   - `SAVE2REPO_DEPLOYMENT_TOKEN` — for the showcase, generate any random
+     32-char string (the real token comes from the Marketplace callback)
+   - `OLONJS_API_BASE` — defaults to `https://app.olon.it/api/v1`
+4. **GitHub App `olonjs`** installed on the Olon GitHub org with access to the
+   `olonjs/*` template repos (already done; if missing, install at
+   `https://github.com/apps/olonjs`).
+5. Visit the deployment URL; the first request triggers the auto-migrate
+   bootstrap (T-102) and then redirects to the GitHub login.
+
+> **Local build on Windows + WSL** is known-broken because turbopack
+> mis-evaluates the UNC root path. Use the CI/Vercel Linux build instead
+> (`.github/workflows/ci.yml`) or run inside the WSL filesystem with native
+> Node (not the Windows nvm4w one).
 
 ## License
 
