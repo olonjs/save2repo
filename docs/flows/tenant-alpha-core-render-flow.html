@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tenant Alpha / Core - Render Flow</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 24px;
+        max-width: 1200px;
+        font-family: Inter, Arial, sans-serif;
+        line-height: 1.45;
+        background: #0f1115;
+        color: #e6e6e6;
+      }
+      h1 {
+        margin: 0 0 6px 0;
+      }
+      h2 {
+        margin: 24px 0 8px 0;
+      }
+      p {
+        margin: 0 0 10px 0;
+        color: #b9c1d1;
+      }
+      .panel {
+        border: 1px solid #2a3140;
+        border-radius: 10px;
+        background: #161a22;
+        padding: 14px;
+        margin-top: 12px;
+      }
+      code {
+        background: #232936;
+        border: 1px solid #2f384b;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      ul {
+        margin: 8px 0 0 18px;
+        color: #c9d0dd;
+      }
+      li {
+        margin: 4px 0;
+      }
+    </style>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "dark", flowchart: { htmlLabels: true } });
+    </script>
+  </head>
+  <body>
+    <h1>Flow render: <code>tenant-alpha</code> -> <code>core</code></h1>
+    <p>
+      Flusso utente/funzione dalla navigazione su <code>/</code> fino al render completo pagina.
+      Evidenziato chi fa cosa: app tenant vs motore core.
+    </p>
+
+    <div class="panel">
+      <pre class="mermaid">
+flowchart TD
+  user["User apre '/'"] --> taMain["tenant-alpha: main.tsx avvia React"]
+  taMain --> taApp["tenant-alpha: App.tsx"]
+  taApp --> taData["tenant-alpha: carica pages/site/menu/theme + registry + schemas"]
+  taData --> taConfig["tenant-alpha: costruisce JsonPagesConfig"]
+  taConfig --> coreEngine["core: JsonPagesEngine(config)"]
+
+  coreEngine --> coreInit["core: init theme + ConfigProvider + BrowserRouter"]
+  coreInit --> routeRoot["core: route '/' -> VisitorRoute"]
+  routeRoot --> slugDefault["core: slug default = home"]
+  slugDefault --> bakedProbe["core: optional baked state da #jp-baked-state"]
+  bakedProbe --> pageResolve["core: resolve pageConfig (baked o pageRegistry['home'])"]
+  pageResolve --> pageCheck{"pageConfig esiste?"}
+  pageCheck -->|no| notFound["core: DefaultNotFound / custom NotFound"]
+  pageCheck -->|yes| themeLoad["core: ThemeLoader(tenant) + StudioProvider(visitor)"]
+  themeLoad --> pageRenderer["core: PageRenderer"]
+  pageRenderer --> sectionRender["core: SectionRenderer header/sezioni/footer"]
+  sectionRender --> tenantComponents["tenant-alpha: componenti concreti dal registry"]
+  tenantComponents --> finalUI["Render finale pagina"]
+      </pre>
+    </div>
+
+    <h2>Responsabilita' per layer</h2>
+    <div class="panel">
+      <ul>
+        <li><strong>tenant-alpha</strong>: prepara dati tenant, registri componenti, schemas, persistence/assets e passa config al motore.</li>
+        <li><strong>core</strong>: gestisce routing, risoluzione pagina, pipeline di render e orchestrazione runtime visitor/studio.</li>
+        <li><strong>Punto di contatto</strong>: <code>&lt;JsonPagesEngine config={...} /&gt;</code>.</li>
+      </ul>
+    </div>
+  </body>
+</html>
+

@@ -1,0 +1,79 @@
+---
+description: Tenant-scoped table FK contract — activated when editing supabase migrations or the tenant delete RPC
+globs: supabase/migrations/**, src/app/api/v1/tenants/[id]/route.ts, src/lib/tenantDeletion.ts, scripts/tenant-delete-enterprise-test.mjs
+---
+
+# Tenant Delete Cascade Contract
+
+## Normative law
+
+**Every new table that holds tenant-scoped data MUST declare its tenant FK with `on delete cascade` toward `public.tenants(id)`. Exceptions must be added explicitly to the delete RPC.**
+
+## Why
+
+`DELETE /api/v1/tenants/[id]` calls the RPC `public.delete_tenant_with_entitlement_release(p_tenant_id)` (see `supabase/migrations/20260319184000_fix_tenant_delete_function_ambiguity.sql` — current version via `create or replace`). The RPC performs only three explicit operations:
+
+1. `delete from public.deployments where tenant_id = p_tenant_id`
+2. `update public.billing_intents set tenant_id = null, state = 'licensed_ready_unassigned' ...` (entitlement retained, tenant detached)
+3. `delete from public.tenants where id = p_tenant_id`
+
+All other cleanup happens via the cascade chain fired by step 3. The RPC does NOT enumerate child tables. This means:
+
+- A new table without `on delete cascade` → **silent orphan rows** after every tenant delete. No error, no log, no test failure.
+- The deploy pipeline will NOT catch this. Code review and this rule are the only gates.
+
+## Mandatory pattern for new tenant-scoped tables
+
+```sql
+create table if not exists public.tenant_<feature> (
+  id uuid primary key default extensions.uuid_generate_v4(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  -- ... rest of columns
+);
+```
+
+Also applies to:
+- Secondary FKs (`tenant_domain_id`, `lead_id`, etc.) — choose `on delete cascade` if the child is meaningless without the parent, or `on delete set null` if it is a detached reference.
+- Composite primary keys that include `tenant_id` — the FK still needs `on delete cascade`.
+
+## Known documented exceptions
+
+These tables intentionally survive tenant deletion. Any new exception MUST be added to this list AND explicitly handled in the RPC body.
+
+| Table | Behavior | Justification |
+|---|---|---|
+| `public.tenant_delete_events` | No FK on `tenant_id` | Audit trail of the delete itself must outlive the tenant row. Cleanup is tied to `actor_user_id` FK on `auth.users` instead. |
+| `public.billing_intents` | FK `on delete cascade` but overridden by `UPDATE` in the RPC before the `DELETE` fires | Paid entitlement must be preserved and made reassignable (`state = 'licensed_ready_unassigned'`). |
+
+## Required steps when introducing a new tenant-scoped table
+
+1. Declare the FK with `on delete cascade` (see pattern above).
+2. If the table must survive (audit/legal/entitlement): document it here **and** add explicit handling to the RPC in a new migration.
+3. Extend `scripts/tenant-delete-enterprise-test.mjs` to assert post-delete row count on the new table (`0` for cascaded, or the expected retained shape for exceptions).
+4. Update `docs/api/README.md` / `docs/flows/v1-tenants-delete.md` if the new feature changes delete semantics.
+
+## Required steps when changing the RPC
+
+If you edit `public.delete_tenant_with_entitlement_release`:
+
+- Create a new migration (`YYYYMMDDHHMMSS_<description>.sql`) using `create or replace function` — do NOT edit historical migrations.
+- Preserve the normative comment block from `20260319170000_tenant_delete_atomic_release.sql` in the new version.
+- Re-run `npm run test:tenant-delete` against a staging tenant with `TENANT_DELETE_TEST_CONFIRM=YES_DELETE`.
+
+## Red flags during code review
+
+- New table with `tenant_id` but no FK → block.
+- New table with `on delete set null` on `tenant_id` not listed in the exception table above → block.
+- Migration that adds columns to `tenants` but does not update the RPC `returning` clause if those columns are reported → verify.
+- Delete endpoint changes that skip the RPC or reorder Vercel/Blob/RPC steps → require justification in the PR description.
+
+## Pattern reference (compliant)
+
+- `supabase/migrations/20260417100000_tenant_agent_credentials.sql` — `tenant_agent_credentials.tenant_id` cascaded correctly (tab API/Agents).
+- `supabase/migrations/20260311130000_tenant_content_store.sql` — `tenant_content_store.tenant_id` cascaded correctly (hotSave storage).
+- `supabase/migrations/20260303100000_tenant_domains_enterprise.sql` — all three domain tables cascaded correctly.
+- `supabase/migrations/20260420120000_licenses_baseline.sql` — `licenses.tenant_id` cascaded (reconciliation of historical drift — includes a guarded `do $$` block that normalizes the FK action to `cascade` even if a historical env had it as `NO ACTION`; use this as the reference pattern for any future baseline/reconciliation migration).
+
+## Drift prevention
+
+If production Supabase contains a tenant-scoped table that is NOT declared in `supabase/migrations/`, it is a **schema drift**. Always reconcile with a baseline migration (`YYYYMMDDHHMMSS_<tablename>_baseline.sql`) using `create table if not exists` + guarded `alter` statements so it is idempotent against prod and constructive on fresh environments. The FK to `public.tenants(id)` MUST be normalized to `on delete cascade` in the same migration (see licenses baseline for the pattern).

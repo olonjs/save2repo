@@ -1,0 +1,29 @@
+---
+
+alwaysApply: true
+description: Execution protocol for production fixes
+---
+
+## Mandatory execution protocol (bug/regression/fix tasks)
+
+For any bug fix, regression, or production-impacting change, follow this exact sequence:
+
+1. **Check**
+   - Reproduce the issue and collect runtime evidence (logs, DB state, API payloads, UI state).
+   - Do not assume root cause without evidence.
+
+2. **Fix**
+   - Apply the minimal correct change that addresses the verified root cause.
+   - Keep behavior and contracts explicit.
+
+3. **Verify live**
+   - Validate with real runtime checks (API call, DB query, UI flow, or equivalent).
+   - Confirm no regression on adjacent paths.
+
+4. **Confirm**
+   - Report: root cause, files changed, verification performed, and final observed result.
+
+### Strict constraints
+- No speculative fixes.
+- No “probably/likely” conclusions without runtime confirmation.
+- If data is missing, ask before proceeding.

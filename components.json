@@ -1,0 +1,30 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/app/globals.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "iconLibrary": "lucide",
+  "registries": {
+    "@tailark-pro": {
+      "url": "https://pro.tailark.com/registry/{name}",
+      "headers": {
+        "Authorization": "Bearer ${TAILARK_API_KEY}"
+      }
+    },
+    "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json"
+  }
+}

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confronto Flussi Save API</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        line-height: 1.4;
+        color: #e6e6e6;
+        background: #0f1115;
+        max-width: 1200px;
+      }
+      h1 {
+        margin-bottom: 8px;
+      }
+      h2 {
+        margin-top: 28px;
+        margin-bottom: 8px;
+      }
+      p {
+        margin-top: 0;
+        margin-bottom: 14px;
+      }
+      .chart {
+        border: 1px solid #2a3140;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 24px;
+        background: #161a22;
+      }
+      code {
+        background: #232936;
+        border: 1px solid #2f384b;
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+    </style>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "dark" });
+    </script>
+  </head>
+  <body>
+    <h1>Confronto Flussi Save API</h1>
+    <p>Confronto tra <code>/api/v1/save</code> e <code>/api/v1/save-stream</code>.</p>
+
+    <h2>Flowchart</h2>
+    <div class="chart">
+      <pre class="mermaid">
+flowchart TD
+  start[Client Request POST]
+
+  start --> auth{Authorization Bearer valida?}
+  auth -- No --> unauthorized[Errore Auth]
+  auth -- Yes --> tenant{Tenant trovato da api_key?}
+  tenant -- No --> invalidKey[Errore API Key]
+  tenant -- Yes --> parseReq{path e content validi?}
+  parseReq -- No --> badReq[Errore Bad Request]
+  parseReq -- Yes --> githubCommit[GitHub createOrUpdateFileContents]
+
+  githubCommit --> split{Endpoint}
+
+  split --> savePath["/api/v1/save"]
+  split --> streamPath["/api/v1/save-stream"]
+
+  savePath --> saveResp[Response JSON success true]
+
+  streamPath --> sseInit[SSE step/log/error]
+  sseInit --> vercelChecks{Vercel config + project presenti?}
+  vercelChecks -- No --> sseErrCfg[Evento error: configurazione Vercel]
+  vercelChecks -- Yes --> waitDeploy[Polling deploy by commitSha]
+  waitDeploy --> deployState{Deploy READY?}
+  deployState -- Timeout/ERROR/CANCELED --> sseErrDeploy[Evento error: deploy failed]
+  deployState -- READY --> liveUrl{URL deploy disponibile?}
+  liveUrl -- No --> sseErrUrl[Evento error: URL mancante]
+  liveUrl -- Yes --> sseDone[Evento done: deployUrl + commitSha]
+      </pre>
+    </div>
+
+    <h2>Sequence Diagram</h2>
+    <div class="chart">
+      <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client
+  participant Api as API_SaveOrStream
+  participant Supabase
+  participant GitHub
+  participant Vercel
+
+  Client->>Api: POST /api/v1/save or /save-stream
+  Api->>Api: Validate Bearer token
+  alt Unauthorized
+    Api-->>Client: Error (401 or SSE error)
+  else Authorized
+    Api->>Supabase: Lookup tenant by api_key
+    Supabase-->>Api: Tenant record
+    alt Invalid tenant or no installation
+      Api-->>Client: Error (403/400 or SSE error)
+    else Tenant valid
+      Api->>Api: Parse path/content/message
+      alt Bad request
+        Api-->>Client: Error (400 or SSE error)
+      else Valid payload
+        Api->>GitHub: getContent(path) optional sha
+        GitHub-->>Api: Existing sha or not found
+        Api->>GitHub: createOrUpdateFileContents
+        GitHub-->>Api: Commit created
+
+        alt Endpoint save
+          Api-->>Client: JSON success: Saved to GitHub
+        else Endpoint save-stream
+          Api-->>Client: SSE step commit/push done
+          Api->>Vercel: Poll deployments by commitSha
+          loop Until READY or timeout
+            Vercel-->>Api: Deployment state
+          end
+          alt READY with url
+            Api-->>Client: SSE done deployUrl + commitSha
+          else ERROR/CANCELED/timeout/noUrl
+            Api-->>Client: SSE error with code/stepId
+          end
+        end
+      end
+    end
+  end
+      </pre>
+    </div>
+  </body>
+</html>

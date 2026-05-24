@@ -1,0 +1,41 @@
+---
+description: API route documentation guardrails — activated when editing API route handlers
+globs: src/app/api/**
+---
+
+# API Route Documentation Requirements
+
+When modifying, adding, or removing any route handler under `src/app/api/`:
+
+## Mandatory documentation updates
+
+1. **Update `docs/api/README.md`:**
+   - Add/update the endpoint in the inventory table (organized by category)
+   - Add/update the detailed section with Auth, Input, Flusso, Output, Error codes
+
+2. **Update or create `docs/flows/v1-<area>-<endpoint>.md`:**
+   - Naming convention: `v1-<area>-<endpoint>.md` (e.g. `v1-tenants-domains.md`)
+   - Related endpoints can share one flow doc (e.g. all domain routes in one file)
+   - Required sections: Purpose, Trigger/Caller, Request Contract, State Machine Effects, External Dependencies, Response Contract, Observability, Failure Modes & Recovery, Verification Gates
+
+3. **Update `docs/flows/README.md`:**
+   - Add the endpoint to the Endpoint Map
+   - Update endpoint count if adding/removing routes (currently: 33)
+
+## Current endpoint count: 33 route handlers
+
+## Critical migration context
+
+- `save2edge` was renamed to `hotSave`. Do NOT create or reference `/api/v1/save2edge`.
+- `hotSave` and `content` use Supabase `tenantContentStore`. Do NOT reference Edge Config for these.
+- `save2repo` still reads from Edge Config (not yet migrated). This is intentional.
+
+## Route conventions
+
+- All v1 public routes: `src/app/api/v1/<area>/route.ts`
+- All internal routes: `src/app/api/v1/internal/` or `src/app/api/internal/`
+- CORS headers for tenant-facing routes (save, content, hotSave, forms)
+- Feature flags check for beta routes (`isSave2RoutesBetaEnabled()`, etc.)
+- `correlationId` from `x-correlation-id` header or auto-generated
+- Error responses use structured `{ error, code, correlationId }` format
+- SSE routes emit `step`, `log`, `error`, `done` events

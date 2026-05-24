@@ -1,0 +1,58 @@
+---
+description: Save and content pipeline context — activated when editing save/content routes or storage libs
+globs: src/app/api/v1/hotSave/**, src/app/api/v1/content/**, src/app/api/v1/save/**, src/app/api/v1/save-stream/**, src/app/api/v1/save2repo/**, src/app/api/v1/tenants/*/save2edge-snapshot/**, src/lib/tenantContentStore.ts, src/lib/saveEdgeConfig.ts, src/lib/saveJspMap.ts, src/lib/saveFeatureFlags.ts, src/lib/saveTelemetry.ts, src/lib/saveContentCache.ts, src/lib/saveRepoToEdgeMap.ts
+---
+
+# Save & Content Pipeline
+
+## Three save paths
+
+| Path | Route | Storage | Status |
+|------|-------|---------|--------|
+| **Hot save** | `POST /api/v1/hotSave` | Supabase `tenantContentStore` | Active (beta) |
+| **Cold sync** | `POST /api/v1/save2repo` | Reads Edge Config -> commits to GitHub -> deploys Vercel | Active (beta) |
+| **Legacy save** | `POST /api/v1/save` | Direct GitHub commit (no deploy) | Legacy |
+| **Legacy stream** | `POST /api/v1/save-stream` | GitHub commit + Vercel deploy with SSE | Legacy |
+
+## Content read
+
+`GET /api/v1/content` reads from Supabase `tenantContentStore` (source: "supabase").
+
+## Critical: storage backend split
+
+- **hotSave + content** use `tenantContentStore` (Supabase). Do NOT reference Edge Config.
+- **save2repo** reads from `saveEdgeConfig` (Vercel Edge Config). This is intentional and NOT yet migrated.
+- Do NOT mix these storage backends.
+
+## hotSave modes
+
+1. **page**: `{ slug, type: "page", data }` — upserts single page via `upsertTenantPage`
+2. **config**: `{ slug, type: "config", data }` — upserts siteConfig via `upsertTenantSiteConfig`
+3. **bundle**: `{ slug, page, siteConfig }` — reads current content, merges page + siteConfig, writes via `replaceTenantContent`
+
+## Dirty state tracking
+
+After each hot save:
+- `tenants.unsynced_changes_count += 1`
+- `tenants.sync_status = "dirty"`
+- `tenants.last_hot_save_at = now`
+
+After successful cold sync (save2repo):
+- `tenants.unsynced_changes_count = 0`
+- `tenants.sync_status = "synced"`
+- `tenants.last_cold_sync_at = now`
+
+## Feature flags
+
+- `SAVE2ROUTES_BETA` — gates all save2 routes (hotSave, save2repo, content)
+- `SAVE_HOT_ENABLED` — gates hotSave specifically
+- `SAVE_REPO_ENABLED` — gates save2repo specifically
+
+## Snapshot
+
+`POST /api/v1/tenants/:id/save2edge-snapshot` reads JSON from GitHub repo and writes full content to Supabase. Used for initial migration of existing tenants.
+
+## Telemetry
+
+- Metrics: `hotsave_success/error`, `save2repo_success/error`, `hotsave_snapshot_success/error`
+- Logs: `hotsave.completed`, `hotsave.failed`, `hotsave.state_update_failed`

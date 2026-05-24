@@ -1,0 +1,41 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="512" height="512">
+	<defs>
+		<linearGradient id="g1" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(152.988,190.037,-191.154,153.887,23.506,4.606)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g2" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(70.119,63.745,-155.168,170.685,64.94,60.383)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g3" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(9.562,9.562,-9.562,9.562,95.219,23.729)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g4" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(9.562,9.562,-9.562,9.562,47.411,63.57)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g5" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(9.562,9.562,-9.562,9.562,143.028,63.57)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+	</defs>
+	<style>
+		.s0 { fill: none;stroke: url(#g1);stroke-linecap: round;stroke-linejoin: round;stroke-width: 8 } 
+		.s1 { fill: none;stroke: url(#g2);stroke-linecap: round;stroke-linejoin: round;stroke-width: 10 } 
+		.s2 { opacity: .6;fill: url(#g3) } 
+		.s3 { opacity: .6;fill: url(#g4) } 
+		.s4 { opacity: .6;fill: url(#g5) } 
+	</style>
+	<path class="s0" d="m100 4.61l63.74 23.9c7.97 3.19 12.75 11.16 12.75 19.12v68.53c0 15.94-6.37 31.87-19.12 43.03l-44.62 31.87c-6.38 4.78-19.12 4.78-25.5 0l-44.62-31.87c-12.75-11.16-19.12-27.09-19.12-43.03v-68.53c0-7.96 4.78-15.93 12.75-19.12z"/>
+	<path class="s1" d="m64.94 100.22l22.31 23.91 47.81-63.75"/>
+	<path fill-rule="evenodd" class="s2" d="m100 33.29c-2.64 0-4.78-2.14-4.78-4.78 0-2.64 2.14-4.78 4.78-4.78 2.64 0 4.78 2.14 4.78 4.78 0 2.64-2.14 4.78-4.78 4.78z"/>
+	<path fill-rule="evenodd" class="s3" d="m52.19 73.13c-2.64 0-4.78-2.14-4.78-4.78 0-2.64 2.14-4.78 4.78-4.78 2.65 0 4.78 2.14 4.78 4.78 0 2.64-2.13 4.78-4.78 4.78z"/>
+	<path fill-rule="evenodd" class="s4" d="m147.81 73.13c-2.65 0-4.78-2.14-4.78-4.78 0-2.64 2.13-4.78 4.78-4.78 2.64 0 4.78 2.14 4.78 4.78 0 2.64-2.14 4.78-4.78 4.78z"/>
+</svg>

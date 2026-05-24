@@ -1,0 +1,49 @@
+---
+description: Custom domains module context — activated when editing domain-related files
+globs: src/app/api/v1/**/domains/**, src/app/api/v1/internal/domains/**, src/lib/customDomains.ts, src/lib/vercelDomains.ts, src/lib/domainTelemetry.ts, src/app/dashboard/**/domains/**
+---
+
+# Custom Domains Module
+
+## Architecture
+
+Tenant custom domains are managed through Vercel's Domains API with a DLQ pattern for resilience.
+
+## Domain status lifecycle
+
+```
+pending_dns -> verifying -> active
+                         -> conflict (misconfigured DNS)
+                         -> error (Vercel API failure)
+           -> deleted (soft delete)
+```
+
+## Auth and governance (required before every mutation)
+
+1. `requireRequestUser` — session auth
+2. `assertTenantAccess` — role check (editor for reads, admin for mutations)
+3. `assertDomainGovernance` — plan/feature gate
+4. `assertDomainPolicy` — domain format validation (POST only)
+5. `enforceDomainMutationRateLimit` — rate limit (POST/DELETE only)
+
+## DLQ pattern
+
+Failed Vercel operations are enqueued to `tenant_domain_dlq`:
+- Automatic retry via `POST /api/v1/internal/domains/reconcile` (cron)
+- Manual retry via `POST /api/v1/internal/domains/dlq/:id/retry` (admin)
+- DLQ items track `attempts`, `last_error_code`, `next_retry_at`
+
+## Supabase tables
+
+- `tenant_domains` — domain records with status, verification targets, Vercel payload
+- `tenant_domain_events` — audit trail (all add/remove/verify/status operations)
+- `tenant_domain_dlq` — dead letter queue for failed Vercel operations
+
+## Idempotency
+
+POST (add) and DELETE (remove) support `Idempotency-Key` header. Replay check via `tenant_domain_events`.
+
+## Metrics and telemetry
+
+- `domain_add_success/error`, `domain_remove_success/error`, `domain_verify_success/error`, `domain_status_refresh_success/error`, `domain_list_success`
+- Structured logs via `logDomain(severity, event, context)`

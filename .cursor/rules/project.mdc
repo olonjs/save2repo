@@ -1,0 +1,47 @@
+---
+description: General project context for jsonpages-platform
+alwaysApply: true
+---
+
+# JsonPages Platform
+
+Next.js 16 App Router SaaS backend. React 19, Tailwind 4, Supabase Auth + DB, Vercel hosting.
+
+## Directory structure
+
+- `src/app/api/v1/` — public API (33 route handlers)
+- `src/app/api/internal/` — admin/cron endpoints (internal token auth)
+- `src/app/dashboard/` — authenticated dashboard (projects, domains, leads, billing)
+- `src/lib/` — shared server-side libraries
+- `docs/api/README.md` — API endpoint inventory and detailed docs
+- `docs/flows/` — per-endpoint flow documentation (one .md per endpoint group)
+- `supabase/` — DB schema and migrations
+- `scripts/` — test and utility scripts
+
+## Auth model
+
+- **Provider:** Supabase Auth with GitHub OAuth
+- **API auth:** `requireRequestUser(req)` validates session, returns user + githubLogin
+- **Tenant access:** `assertTenantAccess({ userId, tenantId, requiredRole })` checks role via `tenants.owner_id` or `tenant_members`
+- **Roles:** `owner | admin | editor` (hierarchical)
+- **Webhook auth:** HMAC signatures (LemonSqueezy: `x-signature`, Resend: Svix headers)
+- **Tenant API auth:** `Authorization: Bearer <tenant_api_key>` for content/save routes
+- **Internal auth:** `requireDomainsAdmin` or `x-cron-secret` / `x-preview-refresh-token` (valore atteso in env `TENANT_PREVIEW_INTERNAL_TOKEN` per le route tenant-preview)
+
+## Key libraries
+
+- `src/lib/tenantContentStore.ts` — tenant content CRUD (Supabase, replaces Edge Config for hot path)
+- `src/lib/serverAuth.ts` — auth helpers
+- `src/lib/saveFeatureFlags.ts` — `SAVE2ROUTES_BETA`, `SAVE_HOT_ENABLED`, `SAVE_REPO_ENABLED`
+- `src/lib/customDomains.ts` — domain validation, governance, rate limiting
+- `src/lib/vercelDomains.ts` — Vercel Domains API wrapper
+- `src/lib/licensing.ts` — billing intent state machine
+- `src/lib/tenantPreview.ts` — screenshot preview tenant (Playwright + Blob), allowlist host, bypass protezione Vercel opzionale
+
+## External integrations
+
+- **Supabase:** auth, tenants, billing_intents, leads, domains, tenant_content
+- **GitHub App:** repo creation, file commits, installation management
+- **Vercel:** project creation, deployments, domains, Edge Config (save2repo only)
+- **LemonSqueezy:** checkout, subscriptions, customer portal
+- **Resend:** email delivery for form submissions

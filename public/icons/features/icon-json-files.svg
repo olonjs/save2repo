@@ -1,0 +1,50 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="512" height="512">
+	<defs>
+		<linearGradient id="g1" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(46.979,46.979,-23.49,23.49,115.66,6.041)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g2" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(125.278,187.917,-151.779,101.186,37.361,6.041)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g3" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(23.49,84.563,-35.776,9.938,53.021,76.51)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g4" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(39.149,6.264,-1.853,11.582,92.17,87.472)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g5" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(54.809,6.264,-1.354,11.844,92.17,110.962)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+		<linearGradient id="g6" x2="1" gradientUnits="userSpaceOnUse" gradientTransform="matrix(46.979,6.264,-1.565,11.735,92.17,134.452)">
+			<stop offset="0" stop-color="#667eea"/>
+			<stop offset=".5" stop-color="#764ba2"/>
+			<stop offset="1" stop-color="#f093fb"/>
+		</linearGradient>
+	</defs>
+	<style>
+		.s0 { fill: none;stroke: url(#g1);stroke-linecap: round;stroke-linejoin: round;stroke-width: 8 } 
+		.s1 { fill: none;stroke: url(#g2);stroke-linecap: round;stroke-linejoin: round;stroke-width: 8 } 
+		.s2 { fill: none;stroke: url(#g3);stroke-linecap: round;stroke-linejoin: round;stroke-width: 6 } 
+		.s3 { opacity: .7;fill: url(#g4) } 
+		.s4 { fill: url(#g5) } 
+		.s5 { opacity: .85;fill: url(#g6) } 
+	</style>
+	<g id="Cartella 1">
+		<path class="s0" d="m115.66 6.04v46.98h46.98"/>
+		<path class="s1" d="m37.36 6.04v187.92h125.28v-140.94l-46.98-46.98z"/>
+		<path class="s2" d="m76.51 76.51c-7.83 0-15.66 4.7-15.66 12.53v21.92c0 4.7-4.7 7.83-7.83 7.83 3.13 0 7.83 3.13 7.83 7.83v21.93c0 7.83 7.83 12.52 15.66 12.52"/>
+		<path fill-rule="evenodd" class="s3" d="m95.3 87.47h32.89c1.73 0 3.13 1.4 3.13 3.13 0 1.73-1.4 3.14-3.13 3.14h-32.89c-1.73 0-3.13-1.41-3.13-3.14 0-1.73 1.4-3.13 3.13-3.13z"/>
+		<path fill-rule="evenodd" class="s4" d="m95.3 110.96h48.55c1.73 0 3.13 1.4 3.13 3.13 0 1.73-1.4 3.14-3.13 3.14h-48.55c-1.73 0-3.13-1.41-3.13-3.14 0-1.73 1.4-3.13 3.13-3.13z"/>
+		<path fill-rule="evenodd" class="s5" d="m95.3 134.45h40.72c1.73 0 3.13 1.4 3.13 3.13 0 1.73-1.4 3.14-3.13 3.14h-40.72c-1.73 0-3.13-1.41-3.13-3.14 0-1.73 1.4-3.13 3.13-3.13z"/>
+	</g>
+</svg>
