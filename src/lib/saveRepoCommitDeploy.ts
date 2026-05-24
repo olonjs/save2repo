@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { App } from "octokit";
-import { logSaveError, logSaveInfo, metricSave } from "@/lib/saveTelemetry";
-import { refreshTenantPreview } from "@/lib/tenantPreview";
+import { logSaveInfo, metricSave } from "@/lib/saveTelemetry";
 
 export type RepoFileForCommit = { path: string; content: unknown };
 
@@ -272,23 +271,7 @@ export async function executeCommitBuildDeploy(params: {
       { onConflict: "commit_sha" }
     );
 
-    const previewLogKey =
-      telemetry.operation === "cold_save" ? "cold_save.preview_refresh_failed" : "save2repo.preview_refresh_failed";
-    const aliasRaw =
-      Array.isArray(deployment.alias) && typeof deployment.alias[0] === "string" ? deployment.alias[0] : null;
-    const aliasPublicUrl = toPublicUrl(aliasRaw);
-    void refreshTenantPreview({
-      tenantId: tenant.id,
-      tenantUrl: aliasPublicUrl ?? deployUrl,
-      reason: "publish",
-      correlationId,
-    }).catch((error) => {
-      logSaveError(previewLogKey, {
-        tenantId: tenant.id,
-        correlationId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    });
+    // save2repo: tenant preview screenshot refresh is out-of-scope at day-1.
 
     const successMetric = telemetry.operation === "cold_save" ? "cold_save_success" : "save2repo_success";
     metricSave(successMetric, 1, {
@@ -312,6 +295,9 @@ export async function executeCommitBuildDeploy(params: {
     const errMetric = telemetry.operation === "cold_save" ? "cold_save_error" : "save2repo_error";
     const errLogKey = telemetry.operation === "cold_save" ? "cold_save.failed" : "save2repo.failed";
     metricSave(errMetric, 1, { internal: true });
+    // logSaveError is referenced by ADR-005 path but removed with preview-refresh import;
+    // re-import locally for the catch path only.
+    const { logSaveError } = await import("@/lib/saveTelemetry");
     logSaveError(errLogKey, { message, tenantId: tenant.id, correlationId });
     return { ok: false, message, code: "ERR_REPO_DEPLOY_PIPELINE_INTERNAL", stepId: "commit" };
   }

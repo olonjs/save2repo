@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 import { assertTenantAccess, requireRequestUser } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { deleteTenantBlobFolders, deleteTenantCloudflareZones } from "@/lib/tenantDeletion";
+import { deleteTenantBlobFolders } from "@/lib/tenantDeletion";
 
 export const dynamic = "force-dynamic";
 
@@ -187,10 +187,7 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     | Awaited<ReturnType<typeof deleteTenantBlobFolders>>
     | null = null;
   let vercelCleanup: VercelDeleteResult | null = null;
-  let cloudflareCleanup:
-    | Awaited<ReturnType<typeof deleteTenantCloudflareZones>>
-    | { error: string; code: string }
-    | null = null;
+  // save2repo (ADR-008): no Cloudflare automation, no zone cleanup on delete.
   let deleteEventId: string | null = null;
 
   const { data: insertedEvent, error: insertEventError } = await supabaseAdmin
@@ -252,13 +249,6 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
       },
       { status: 502 }
     );
-  }
-
-  try {
-    cloudflareCleanup = await deleteTenantCloudflareZones(params.id);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Cloudflare cleanup failed";
-    cloudflareCleanup = { error: message, code: "ERR_TENANT_CF_CLEANUP_FAILED" };
   }
 
   try {
@@ -355,7 +345,6 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
       entitlementsReleased: Number(row.entitlements_released ?? 0),
       vercel: vercelCleanup,
       blob: blobCleanup,
-      cloudflare: cloudflareCleanup,
     },
   };
 

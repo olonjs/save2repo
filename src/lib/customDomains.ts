@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { hasActivePaidEntitlement } from '@/lib/licensing';
 
 export type DomainStatus =
   | 'pending_dns'
@@ -200,25 +199,8 @@ export async function assertDomainGovernance(params: {
   userId: string;
   tenantId: string;
 }): Promise<{ ok: true } | { ok: false; status: number; error: string; code: string }> {
-  try {
-    const hasEntitlement = await hasActivePaidEntitlement({ userId: params.userId, tenantId: params.tenantId });
-    if (!hasEntitlement) {
-      return {
-        ok: false,
-        status: 403,
-        error: 'Custom domains are available only for active paying tenants',
-        code: 'ERR_DOMAIN_ENTITLEMENT_REQUIRED',
-      };
-    }
-  } catch {
-    return {
-      ok: false,
-      status: 500,
-      error: 'Failed to validate tenant entitlement',
-      code: 'ERR_DOMAIN_ENTITLEMENT_LOOKUP_FAILED',
-    };
-  }
-
+  // save2repo: single-owner, no licensing gate on custom domains.
+  // The Marketplace subscription is enforced upstream (Vercel native billing).
   const supabaseAdmin = getSupabaseAdmin();
   const { count, error } = await supabaseAdmin
     .from('tenant_domains')

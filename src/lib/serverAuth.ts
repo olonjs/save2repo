@@ -2,36 +2,48 @@ import { createClient, type User } from '@supabase/supabase-js';
 import { NextRequest } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 
+// ----------------------------------------------------------------------------
+// save2repo is single-owner per ADR-002: every deployment has exactly one user
+// (the buyer/owner) and N tenants that belong to that user. Multi-role +
+// tenant_members semantics from the parent jsonpages-platform are removed.
+//
+// `assertOwner` is the canonical check used by Phase 1 routes. The legacy
+// `assertTenantAccess` export is kept as a thin alias so the consumer routes
+// already inherited from the parent compile unchanged; T-1xx will rename
+// call sites and drop the alias.
+// ----------------------------------------------------------------------------
+
 type AuthSuccess = {
   user: User;
   accessToken: string;
   githubLogin: string | null;
 };
-//comment
+
 type AuthError = {
   status: number;
   error: string;
 };
 
-export type TenantRole = 'owner' | 'admin' | 'editor';
+export type TenantRole = 'owner';
 
-type TenantAccessSuccess = {
-  tenantId: string;
-  role: TenantRole;
-  tenant: {
-    id: string;
-    owner_id: string;
-    vercel_project_id: string | null;
-  };
+export type TenantOwnerTenant = {
+  id: string;
+  owner_user_id: string;
+  vercel_project_id: string | null;
 };
 
-type TenantAccessError = {
+type TenantOwnerSuccess = {
+  tenantId: string;
+  role: TenantRole;
+  tenant: TenantOwnerTenant;
+};
+
+type TenantOwnerError = {
   status: number;
   error: string;
   code:
     | 'ERR_TENANT_NOT_FOUND'
     | 'ERR_TENANT_ACCESS_DENIED'
-    | 'ERR_TENANT_ROLE_INSUFFICIENT'
     | 'ERR_TENANT_ACCESS_LOOKUP_FAILED';
 };
 
@@ -51,7 +63,6 @@ function resolveGithubLogin(user: User): string | null {
     metadata.login,
     metadata.name,
   ];
-
   for (const value of candidates) {
     if (typeof value === 'string' && value.trim()) {
       return value.trim();
@@ -70,7 +81,6 @@ export async function requireRequestUser(
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
   if (!supabaseUrl || !supabaseAnonKey) {
     return { ok: false, data: { status: 500, error: 'Supabase auth is not configured' } };
   }
@@ -91,27 +101,20 @@ export async function requireRequestUser(
   };
 }
 
-function roleWeight(role: TenantRole): number {
-  if (role === 'owner') return 3;
-  if (role === 'admin') return 2;
-  return 1;
-}
-
-function canSatisfyRole(currentRole: TenantRole, requiredRole: TenantRole): boolean {
-  return roleWeight(currentRole) >= roleWeight(requiredRole);
-}
-
-export async function assertTenantAccess(params: {
+/**
+ * Assert the request user is the owner of the requested tenant.
+ * Single-owner only — no role hierarchy, no membership table.
+ */
+export async function assertOwner(params: {
   userId: string;
   tenantId: string;
-  requiredRole?: TenantRole;
-}): Promise<{ ok: true; data: TenantAccessSuccess } | { ok: false; data: TenantAccessError }> {
-  const { userId, tenantId, requiredRole = 'editor' } = params;
+}): Promise<{ ok: true; data: TenantOwnerSuccess } | { ok: false; data: TenantOwnerError }> {
+  const { userId, tenantId } = params;
   const supabaseAdmin = getSupabaseAdmin();
 
   const { data: tenant, error: tenantError } = await supabaseAdmin
     .from('tenants')
-    .select('id, owner_id, vercel_project_id')
+    .select('id, owner_user_id, vercel_project_id')
     .eq('id', tenantId)
     .maybeSingle();
 
@@ -137,52 +140,31 @@ export async function assertTenantAccess(params: {
     };
   }
 
-  if (tenant.owner_id === userId) {
-    return { ok: true, data: { tenantId, role: 'owner', tenant } };
-  }
-
-  // Optional tenant_members support if the table exists in the environment.
-  const membershipResult = await supabaseAdmin
-    .from('tenant_members')
-    .select('role')
-    .eq('tenant_id', tenantId)
-    .eq('user_id', userId)
-    .is('deleted_at', null)
-    .maybeSingle();
-
-  if (membershipResult.error && membershipResult.error.code !== '42P01') {
-    return {
-      ok: false,
-      data: {
-        status: 500,
-        error: 'Failed to resolve tenant membership',
-        code: 'ERR_TENANT_ACCESS_LOOKUP_FAILED',
-      },
-    };
-  }
-
-  const membershipRole = (membershipResult.data?.role ?? null) as TenantRole | null;
-  if (!membershipRole || !['owner', 'admin', 'editor'].includes(membershipRole)) {
+  if (tenant.owner_user_id !== userId) {
     return {
       ok: false,
       data: {
         status: 403,
-        error: 'Access denied for tenant',
+        error: 'Access denied: not the owner of this tenant',
         code: 'ERR_TENANT_ACCESS_DENIED',
       },
     };
   }
 
-  if (!canSatisfyRole(membershipRole, requiredRole)) {
-    return {
-      ok: false,
-      data: {
-        status: 403,
-        error: 'Insufficient tenant role',
-        code: 'ERR_TENANT_ROLE_INSUFFICIENT',
-      },
-    };
-  }
+  return { ok: true, data: { tenantId, role: 'owner', tenant: tenant as TenantOwnerTenant } };
+}
 
-  return { ok: true, data: { tenantId, role: membershipRole, tenant } };
+/**
+ * Legacy compatibility alias.
+ * Parent jsonpages-platform code called `assertTenantAccess` with an optional
+ * `requiredRole`. In save2repo there is only one role (`owner`); the param is
+ * accepted and ignored. T-1xx renames call sites and drops this alias.
+ */
+export async function assertTenantAccess(params: {
+  userId: string;
+  tenantId: string;
+  requiredRole?: TenantRole | 'admin' | 'editor';
+}): ReturnType<typeof assertOwner> {
+  void params.requiredRole;
+  return assertOwner({ userId: params.userId, tenantId: params.tenantId });
 }

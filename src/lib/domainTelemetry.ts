@@ -1,34 +1,29 @@
-type LogLevel = 'info' | 'warn' | 'error';
+// save2repo Phase 0 stub for domain telemetry.
+//
+// The parent jsonpages-platform implementation pushed structured log lines
+// and metric counters to internal observability (`tenant_domain_events`,
+// custom log sink). save2repo runs in the buyer's Vercel project, so the
+// destination of these events is not yet decided (likely Vercel logs +
+// optional Supabase audit table). T-1xx will wire a concrete implementation.
+//
+// For now: no-op helpers preserve the call sites in
+// `src/app/api/v1/tenants/[id]/domains/**` without coupling them to a
+// removed dependency.
 
-function toLogLine(level: LogLevel, message: string, context: Record<string, unknown>) {
-  return {
-    scope: 'custom-domains',
-    level,
-    message,
-    ...context,
-  };
+type LogLevel = "info" | "warn" | "error";
+
+export function logDomain(
+  _level: LogLevel,
+  _eventName: string,
+  _payload: Record<string, unknown> = {},
+): void {
+  // intentional no-op (T-1xx)
 }
 
-export function logDomain(level: LogLevel, message: string, context: Record<string, unknown>) {
-  const payload = toLogLine(level, message, context);
-  if (level === 'error') {
-    console.error(payload);
-    return;
-  }
-  if (level === 'warn') {
-    console.warn(payload);
-    return;
-  }
-  console.info(payload);
-}
-
-export function metricDomain(name: string, value: number, tags: Record<string, string | number | boolean>) {
-  // Lightweight metric emission via structured logs; scrape downstream in the log pipeline.
-  console.info({
-    scope: 'custom-domains.metric',
-    metric: name,
-    value,
-    tags,
-    at: new Date().toISOString(),
-  });
+export function metricDomain(
+  _name: string,
+  _value = 1,
+  _tags: Record<string, unknown> = {},
+): void {
+  // intentional no-op (T-1xx)
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateKeyPairSync, createPublicKey } from "crypto";
 import { assertTenantAccess, requireRequestUser } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 
 export const dynamic = "force-dynamic";
 

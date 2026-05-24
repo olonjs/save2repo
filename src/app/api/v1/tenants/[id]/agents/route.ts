@@ -6,7 +6,7 @@ import {
   normalizeScopes,
   type AgentCredentialScope,
 } from "@/lib/mcpGatewayCredentials";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 
 export const dynamic = "force-dynamic";
 

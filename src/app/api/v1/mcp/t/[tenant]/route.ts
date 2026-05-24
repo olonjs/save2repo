@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveMcpGatewayTenantContext } from "@/lib/mcpGatewayAuth";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 import { err, handleMcpJsonRpc, mcpCorsHeaders } from "@/lib/mcpGatewayHandler";
 
 export const dynamic = "force-dynamic";

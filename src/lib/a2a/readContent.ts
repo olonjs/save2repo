@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { readTenantContent } from "@/lib/tenantContentStore";
-import {
-  SubmitFormSchemaError,
-  fetchPageContractSnapshot,
-} from "@/lib/tenantSubmissionSchema";
-import { a2aCorsHeaders, err, ok } from "@/lib/a2a/jsonRpc";
+import { a2aCorsHeaders, ok } from "@/lib/a2a/jsonRpc";
 
+/**
+ * A2A read-content tool — save2repo flavor.
+ *
+ * TODO(T-111): wire to GitHub Contents API via the tenant's repo and the
+ * shared `olonjs` GitHub App installation token (see ADR-006, ADR-010). The
+ * parent jsonpages-platform implementation read from the centralized
+ * `tenant_content_store` Supabase table; save2repo has removed that store
+ * per ADR-005 and reads content directly from the tenant's repo at
+ * `<owner>/<repo-slug>` (e.g. `pages/<slug>.jsp.json`).
+ *
+ * For now this returns an empty content envelope so the MCP gateway can
+ * advertise the tool without runtime errors; the agent must fall back to
+ * editor-driven save until T-111 lands.
+ */
 export async function executeA2aReadContent(params: {
   tenant: { id: string; slug: string };
   correlationId: string;
@@ -13,32 +22,8 @@ export async function executeA2aReadContent(params: {
   args: Record<string, unknown>;
 }): Promise<NextResponse> {
   const { tenant, correlationId, id, args } = params;
-
-  const payload = await readTenantContent(tenant.id);
-  const slug = typeof args.slug === "string" && args.slug.trim() ? args.slug.trim() : "home";
-  const page = payload?.pages?.[slug] ?? null;
-
-  let snapshot;
-  try {
-    snapshot = await fetchPageContractSnapshot({
-      tenantId: tenant.id,
-      slug,
-      correlationId,
-    });
-  } catch (error) {
-    if (error instanceof SubmitFormSchemaError) {
-      return NextResponse.json(
-        err(id, -32030, error.message, {
-          code: error.code,
-          slug,
-          correlationId,
-          ...(error.details ?? {}),
-        }),
-        { status: error.httpStatus, headers: a2aCorsHeaders }
-      );
-    }
-    throw error;
-  }
+  const slug =
+    typeof args.slug === "string" && args.slug.trim() ? args.slug.trim() : "home";
 
   return NextResponse.json(
     ok(id, {
@@ -49,10 +34,9 @@ export async function executeA2aReadContent(params: {
             {
               tenantSlug: tenant.slug,
               slug,
-              page,
-              siteConfig: payload?.siteConfig ?? null,
-              schemaBaseUrl: snapshot.baseUrl,
-              sectionSubmissionSchemas: snapshot.sectionSubmissionSchemas,
+              page: null,
+              siteConfig: null,
+              note: "T-111 not yet implemented; read-content returns empty envelope",
               correlationId,
             },
             null,

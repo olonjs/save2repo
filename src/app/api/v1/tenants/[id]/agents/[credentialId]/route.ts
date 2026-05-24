@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { assertTenantAccess, requireRequestUser } from "@/lib/serverAuth";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 import { revokeTenantAgentCredential } from "@/lib/mcpGatewayCredentials";
 
 export const dynamic = "force-dynamic";

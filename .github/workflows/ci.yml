@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        # --ignore-scripts skips Supabase CLI postinstall (downloads its binary).
+        # Local-dev/dev script flows pre-cache the binary or use `npx supabase`
+        # which we do not invoke during CI.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build needs values present at module-init time. CI uses placeholders;
+          # production env is injected by Vercel from the Marketplace install
+          # callback (see ADR-007).
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+          SUPABASE_SERVICE_ROLE_KEY: placeholder
+          SUPABASE_JWT_SECRET: placeholder
+          SAVE2REPO_DEPLOYMENT_TOKEN: placeholder
+          OLONJS_API_BASE: https://placeholder.olon.it/api/v1

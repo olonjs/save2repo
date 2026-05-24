@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { resolveCorrelationId } from "@/lib/licensing";
+import { resolveCorrelationId } from "@/lib/correlation";
 import { a2aCorsHeaders, err, extractToolArguments, ok, type JsonRpcRequest } from "@/lib/a2a/jsonRpc";
 import { executeA2aReadContent } from "@/lib/a2a/readContent";
-import { executeA2aSubmitForm } from "@/lib/a2a/submitForm";
+// save2repo: submit-form tool removed (forms out-of-scope at day-1; T-1xx may reintroduce).
 
 export const dynamic = "force-dynamic";
 
@@ -24,32 +24,6 @@ const A2A_TOOLS = [
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
-    },
-  },
-  {
-    name: "submit-form",
-    description:
-      "Submit a contact, booking, or inquiry form on the tenant's website on the user's behalf. The exact shape of the fields each form expects is returned by read-content under `sectionSubmissionSchemas[sectionType]` — always read-content the target page first to plan the `data` payload. The destination email address is configured by the tenant and cannot be changed by the agent.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        slug: { type: "string", description: "Slug of the page hosting the form (default: home)." },
-        sectionId: { type: "string", description: "Concrete section instance id of the form to submit against." },
-        data: {
-          type: "object",
-          description:
-            "Submission payload collected from the user. Must conform to sectionSubmissionSchemas[sectionType] from the tenant page contract. Do not include recipientEmail — it is resolved server-side from the section config.",
-        },
-      },
-      required: ["sectionId", "data"],
-      additionalProperties: false,
-    },
-    annotations: {
-      title: "Submit a form on the tenant site",
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
     },
   },
 ];
@@ -139,10 +113,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ tenant: st
 
     if (toolName === "read-content") {
       return executeA2aReadContent({ tenant, correlationId, id, args });
-    }
-
-    if (toolName === "submit-form") {
-      return executeA2aSubmitForm({ req, tenant, correlationId, id, args });
     }
 
     return NextResponse.json(err(id, -32601, `Unknown tool: ${toolName}`), { status: 404, headers: a2aCorsHeaders });

@@ -2,18 +2,20 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
-  serverExternalPackages: ["@sparticuz/chromium", "playwright-core"],
-  outputFileTracingIncludes: {
-    "/*": [
-      "./node_modules/@sparticuz/chromium/**/*",
-      "./node_modules/playwright-core/**/*",
-    ],
+
+  // save2repo lives at /home/dev/save2repo (WSL). When the build runs via the
+  // Windows node binary across a \\wsl.localhost UNC path, turbopack can
+  // misdetect the workspace root if any sibling directory contains a stray
+  // package-lock.json. Pin the root explicitly.
+  turbopack: {
+    root: __dirname,
   },
+
   images: {
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: '**',
+        protocol: "https",
+        hostname: "**",
       },
     ],
   },
