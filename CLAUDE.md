@@ -1,8 +1,8 @@
 # CLAUDE.md — save2repo
 
-Pre-fork: la dir è quasi vuota, esiste solo `docs/specs/save2repo.md`. Il codice nascerà come **fork di jsonpages-platform** (vedi sezione *Origin* dello spec).
+Fork attivo da jsonpages-platform (T-001 done, commit `52e4f75`). Implementation in corso secondo [docs/plans/save2repo-tasks.md](docs/plans/save2repo-tasks.md).
 
-**Source of truth fino a Phase 2 (Plan):** `docs/specs/save2repo.md`. Leggi quello prima di proporre cambiamenti.
+**Source of truth:** [docs/specs/save2repo.md](docs/specs/save2repo.md) + ADR in [docs/decisions/](docs/decisions/README.md). Leggili prima di proporre cambiamenti.
 
 ## Tech stack (ereditato da jsonpages-platform, modificato come da spec)
 

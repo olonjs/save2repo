@@ -1,5 +1,5 @@
 {
-  "name": "jsonpages-platform",
+  "name": "save2repo",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,13 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:domains": "node scripts/domain-status-sot-test.mjs && node scripts/custom-domains-enterprise-test.mjs",
-    "test:domains:cf": "node scripts/cf-domains-test.mjs",
-    "test:domains:sot": "node scripts/domain-status-sot-test.mjs",
-    "test:domains:ui": "node scripts/domains-ui-suite.mjs",
-    "test:forms": "node scripts/forms-resend-suite.mjs",
-    "test:save2:smoke": "node scripts/save2-hot-cold-smoke.mjs",
-    "test:tenant-delete": "node scripts/tenant-delete-enterprise-test.mjs"
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@fontsource-variable/merriweather": "^5.2.6",

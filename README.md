@@ -1,65 +1,56 @@
-# JsonPages Platform
+# save2repo
 
-Orchestratore cloud per [JsonPages](https://jsonpages.io): crea e gestisci tenant sovereign (repo GitHub + deploy Vercel), collega repository esistenti, dashboard progetti.
+A multi-tenant CMS distributed as a Vercel Native Integration. Install it on
+your own Vercel team via the Marketplace; from your deployment you manage N
+tenant sites whose content lives in your GitHub repos (no centralized storage
+on our side). AI agents can edit your content natively via MCP and A2A
+protocols.
 
-## Stack
+Source-available under [BUSL 1.1](LICENSE). Commercial use requires an active
+subscription via the Vercel Marketplace.
 
-- **Next.js 16** (App Router)
-- **Supabase** (auth, tabella `tenants`)
-- **GitHub App** (creazione repo da template, lista installazioni/repo)
-- **Vercel API** (progetti, env, trigger deploy)
+## What you get
 
-## Avvio
+- **CMS dashboard** to manage all your tenant sites in one place
+- **Save → commit → live** flow: every change is a commit to the tenant repo
+  (no separate content store), Vercel auto-rebuilds the site
+- **MCP server per tenant** so AI agents (Claude, ChatGPT custom GPT, custom
+  A2A peers) can read and write content using machine-standard interfaces
+- **Custom domains** via Vercel domains API on whatever DNS provider you use
+- **Zero centralized cost of CMS**: you pay only the Vercel + Supabase you
+  already pay for, plus the save2repo subscription via Vercel native billing
+
+## Quick start
+
+1. Install save2repo from the [Vercel Marketplace](https://vercel.com/integrations/save2repo)
+   on your team. The install auto-forks the source into your GitHub and deploys
+   it as a new Vercel project of yours.
+2. The install guides you to add the [Supabase integration](https://vercel.com/integrations/supabase)
+   and to install the [`olonjs` GitHub App](https://github.com/apps/olonjs) on
+   your account if they are not present yet.
+3. Open your save2repo URL, log in with GitHub, and create your first tenant
+   from one of the templates.
+
+## Architecture decisions
+
+All architectural decisions live in [`docs/decisions/`](docs/decisions/README.md).
+The implementation plan is in [`docs/plans/save2repo-plan.md`](docs/plans/save2repo-plan.md).
+The product spec is in [`docs/specs/save2repo.md`](docs/specs/save2repo.md).
+
+## Development
 
 ```bash
 npm install
-npm run dev
+cp .env.example .env.local       # fill the values
+npm run dev                      # next dev on port 3000
+npm run lint
+npm run build
+npm run type-check
 ```
 
-Apri [http://localhost:3000](http://localhost:3000). Per la dashboard e il flusso di provisioning serve auth Supabase e variabili d'ambiente (vedi `CONTEXT.md`).
+See [CLAUDE.md](CLAUDE.md) for the project conventions an AI agent should
+follow.
 
-## Struttura progetto
+## License
 
-| Percorso | Descrizione |
-|----------|-------------|
-| `src/app/` | Home, auth, dashboard (lista progetti, modal Create Tenant, scheda progetto con tab Overview/Settings/API/Billing) |
-| `src/app/api/v1/tenants/` | API tenant: `create` (legacy sync), `provision-stream` (SSE unificato) |
-| `src/app/api/v1/github/` | Installazioni e lista repo GitHub |
-| `src/app/api/v1/licensing/` | Bridge status GitHub, checkout LS server-side, checkout status |
-| `src/app/api/v1/webhooks/ls/` | Webhook LemonSqueezy idempotente per stato licensing |
-| `src/lib/` | Supabase client e admin |
-
-## API Docs (flussi funzione)
-
-- Guida completa endpoint-by-endpoint: `docs/api/README.md`
-- Include:
-  - flussi operativi per tutti gli endpoint `api/v1`,
-  - confronto `save` vs `save-stream`,
-  - error handling e output contract,
-  - diagramma sequence per `save-stream`.
-
-## Flussi principali
-
-- **Provisioning unificato**: Step 1 GitHub → Step 2 scelta sorgente (template o repository) → SSE `provision-stream` (repo create/link → progetto Vercel → env → primo deploy → DB). Redirect a scheda Overview dopo 5 s.
-- Se un nome progetto è già usato su Vercel, il sistema prova un suffisso random fino a trovare un nome libero.
-
-## Endpoint consigliati in produzione
-
-- **Provisioning tenant**: usare `/api/v1/tenants/provision-stream`.
-- **Salvataggio contenuti**: usare `/api/v1/save-stream` (attende deploy e restituisce `deployUrl` canonico).
-- **Licensing Landing-first**: usare `/api/v1/licensing/bridge-status`, `/api/v1/licensing/create-checkout`, `/api/v1/licensing/checkout-status`.
-- **Endpoint legacy** (`/api/v1/save`, `/api/v1/tenants/create`): mantenuti per compatibilita, non raccomandati per nuovi flussi.
-
-## Variabili d'ambiente
-
-Vedi **CONTEXT.md** per l’elenco (Supabase, GitHub App, Vercel, Lemon Squeezy) e per dettagli su migrazioni, permessi GitHub e flussi API.
-
-Per il flusso LS Fase 1 servono almeno:
-
-- `LS_API_KEY`
-- `LS_STORE_ID`
-- `LS_VARIANT_STARTER_ID` (opzionali: `LS_VARIANT_PRO_ID`, `LS_VARIANT_BUSINESS_ID`)
-- `LS_WEBHOOK_SECRET`
-- `NEXT_PUBLIC_APP_URL` (redirect URL assoluto post-checkout)
-- `LS_PHASE1_ENABLED=true` (backend rollout flag)
-- `NEXT_PUBLIC_LS_PHASE1_ENABLED=true` (frontend rollout flag)
+[BUSL 1.1](LICENSE). Becomes Apache 2.0 four years after each release.
