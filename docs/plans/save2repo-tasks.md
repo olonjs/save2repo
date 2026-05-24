@@ -224,9 +224,15 @@ CORS: solo origins `*.vercel.app` (i deployment buyer). Rate limit per deploymen
 
 ### T-101: Login GitHub OAuth + landing
 **Description:** pagina `/login` con bottone "Continue with GitHub" → `supabase.auth.signInWithOAuth({ provider: 'github' })`. Pagina `/auth/callback` gestisce session. Redirect `/dashboard` post-login.
+
+**Pre-requisito di setup (lato operator del showcase / buyer):**
+1. Creare una **OAuth App `save2repo` dedicata** su GitHub (settings/developers → New OAuth App) — vedi [ADR-009](../decisions/ADR-009-auth-github-oauth-hardcoded.md) "OAuth App dedicata vs GitHub App olonjs". **NON usare la GitHub App olonjs**: callback URL diverso + brand consent diverso.
+2. Callback URL della OAuth App = `https://<supabase-ref>.supabase.co/auth/v1/callback`.
+3. In Supabase Studio del project → Authentication → Providers → GitHub → Enable + paste Client ID + Client Secret della OAuth App save2repo.
+
 **Acceptance:**
-- [ ] click su "Continue with GitHub" → OAuth flow → session attiva → redirect dashboard
-- [ ] Supabase auth provider GitHub configurato nel test project
+- [ ] click su "Continue with GitHub" → OAuth flow (consent screen mostra "save2repo") → session attiva → redirect dashboard
+- [ ] Supabase auth provider GitHub configurato nel project + OAuth App dedicata creata
 **Verification:**
 - [ ] manual E2E
 **Dependencies:** T-008
@@ -237,7 +243,9 @@ CORS: solo origins `*.vercel.app` (i deployment buyer). Rate limit per deploymen
 **Description:** helper `firstBoot.ts` che al server start verifica env runtime; middleware redirige a `/setup` se incompleto. Pagina `/setup` mostra checklist:
 - Supabase ENV `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` presenti
 - `SAVE2REPO_DEPLOYMENT_TOKEN` presente
-- GitHub App olonjs installation_id presente in `owner_integrations` (se no, link install)
+- **GitHub OAuth provider abilitato** in Supabase Auth (`/auth/v1/admin/providers` o equivalente — la mancata abilitazione produce `Unsupported provider: provider is not enabled` al click di "Continue with GitHub")
+- **OAuth App `save2repo` configurata** con callback URL corretto (lo deduciamo dalla presenza del Client ID + Secret sul provider GitHub di Supabase; mancano = card "Setup OAuth App save2repo")
+- GitHub App olonjs installation_id presente in `owner_integrations` (se no, link install — questo è separato dall'OAuth App, vedi ADR-009)
 
 Se complete: esegue auto-migrate idempotente (controlla `pg_tables` prima di CREATE).
 
@@ -245,11 +253,30 @@ Se complete: esegue auto-migrate idempotente (controlla `pg_tables` prima di CRE
 - [ ] env mancante → UI esplicita con link/istruzioni
 - [ ] env complete → auto-migrate verde, ridireziona a `/dashboard`
 - [ ] idempotente: ri-boot non duplica
+- [ ] provider GitHub non abilitato → card "Enable GitHub provider in Supabase Auth + paste OAuth App save2repo credentials"
+- [ ] GitHub App olonjs non installed → card distinta "Install GitHub App olonjs on your account"
 **Verification:**
 - [ ] simulare env mancanti → verificare wizard; ri-boot → no duplicate
+- [ ] simulare provider GitHub Supabase disabled → wizard mostra card distinta
 **Dependencies:** T-101, T-005
-**Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`, `src/middleware.ts`
+**Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`, `src/proxy.ts`
 **Scope:** M
+
+### T-102.b: Setup wizard — GitHub OAuth provider + OAuth App detection (follow-up)
+**Description:** estendere `src/lib/firstBoot.ts` e la pagina `/setup` per detectare e guidare il setup dei due pezzi mancati da T-102 originale:
+1. **Provider GitHub abilitato in Supabase Auth**: chiamata a Supabase Auth admin API (o GoTrue) via `SUPABASE_SERVICE_ROLE_KEY` per verificare lo state dei providers (`gotrue.config` o `/admin/providers`); se `github` non è `enabled`, render card con istruzioni + deep-link a Supabase Studio Auth → Providers.
+2. **OAuth App save2repo configurata**: se il provider GitHub è enabled ma `client_id` è vuoto/placeholder, render card "Create OAuth App save2repo on GitHub" con il template callback URL `https://<this-supabase-ref>.supabase.co/auth/v1/callback`.
+
+**Acceptance:**
+- [ ] Provider disabled → wizard chiaro, no `Unsupported provider` runtime error mai più
+- [ ] Provider enabled ma config vuoto → wizard chiaro
+- [ ] Tutto OK → no card visibile
+**Verification:**
+- [ ] disable provider GitHub in Supabase Studio → reload `/setup` → card appare
+- [ ] re-enable + paste credentials → reload → card sparisce
+**Dependencies:** T-102
+**Files:** `src/lib/firstBoot.ts`, `src/app/setup/page.tsx`
+**Scope:** S
 
 ### T-103: Re-auth integrations Vercel OAuth
 **Description:** pagina `/settings/integrations` con "Connect Vercel"; callback `/auth/vercel/callback` salva `vercel_oauth_token` + `vercel_team_id` in `owner_integrations`. UI mostra "Connected: team X" + bottone disconnect/reconnect.

@@ -18,6 +18,27 @@ Il template save2repo viene con `supabase.auth.signInWithOAuth({ provider: 'gith
 
 Auth pluggable a più provider (Google, magic link, SSO/SAML) = **evoluzione post-launch, fuori day-1 scope**.
 
+## OAuth App dedicata vs GitHub App `olonjs` (chiarimento post-setup)
+
+**Importante:** il provider GitHub di Supabase Auth (login utente) NON usa la
+GitHub App `olonjs` di [ADR-006](ADR-006-shared-olonjs-github-app-with-token-signing.md).
+Sono due app GitHub distinte con scopi distinti:
+
+| | GitHub App `olonjs` (ADR-006) | OAuth App `save2repo` (questo ADR) |
+|---|---|---|
+| **Scopo** | Server-to-server: fork repo template, commit save flow ai repo tenant | User login (Supabase Auth provider GitHub) |
+| **Registrazione** | Nell'org GitHub `olonjs`/`Olon` — **condivisa** tra tutti i deployment save2repo + jsonpages-platform | Nel GitHub account `olonjs`/`Olon` — **dedicata** save2repo |
+| **Callback URL** | (non rilevante per server-to-server; usa installation token signing) | `https://<save2repo-supabase-ref>.supabase.co/auth/v1/callback` |
+| **Credenziali** | App ID + private key (gestite dal nostro backend, ADR-006) | Client ID + Client Secret (configurate nel project Supabase del buyer/showcase) |
+| **Brand visibile** | "olonjs[bot]" come commit author | "save2repo" come OAuth consent screen |
+
+Perché due e non una:
+1. **Callback URL distinto**: una GitHub App ha una sola "User authorization callback URL" registrata (o un set fisso). Quella della GitHub App `olonjs` punta al Supabase di jsonpages-platform; non può anche puntare al Supabase di save2repo senza modificare la registrazione condivisa.
+2. **Brand del consent screen**: quando l'utente fa "Continue with GitHub" per save2repo, deve vedere "save2repo" come app che chiede consenso, non "olonjs".
+3. **Separazione clean tra prodotti**: jsonpages-platform e save2repo sono prodotti distinti commercialmente (vedi [ADR-001](ADR-001-fork-from-jsonpages-platform.md)); che ognuno abbia la sua OAuth App è coerente con il fork separato.
+
+L'OAuth App `save2repo` viene creata una volta sola dal team Olon (showcase setup) e le sue credenziali (Client ID + Secret) sono inserite manualmente nel Supabase Auth Providers GitHub di ciascun deployment buyer durante l'onboarding. In Phase 2 (T-202) il Marketplace install callback potrà automatizzare anche questa configurazione via Supabase Auth Admin API.
+
 ## Alternatives Considered
 
 ### Auth pluggable con provider configurabili dal buyer post-install

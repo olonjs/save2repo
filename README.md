@@ -76,9 +76,25 @@ time:
    - `OLONJS_API_BASE` — defaults to `https://app.olon.it/api/v1`
 4. **GitHub App `olonjs`** installed on the Olon GitHub org with access to the
    `olonjs/*` template repos (already done; if missing, install at
-   `https://github.com/apps/olonjs`).
-5. Visit the deployment URL; the first request triggers the auto-migrate
-   bootstrap (T-102) and then redirects to the GitHub login.
+   `https://github.com/apps/olonjs`). **Note:** this is the server-to-server
+   GitHub App used for repo fork + commit save flow (ADR-006). It is *not*
+   the same as the OAuth App used for user login (see step 5 below).
+5. **OAuth App `save2repo` for user login** — distinct from the `olonjs`
+   GitHub App above (see ADR-009 §"OAuth App dedicata vs GitHub App olonjs"):
+   - On GitHub: Settings → Developer settings → OAuth Apps → New OAuth App.
+     Application name: `save2repo`. Homepage URL: the deployment URL of
+     this save2repo. **Authorization callback URL:**
+     `https://<supabase-ref>.supabase.co/auth/v1/callback`
+     (replace `<supabase-ref>` with the ref of the Supabase project from
+     step 1, e.g. `https://rksmblpvrafygdtnvjzt.supabase.co/auth/v1/callback`).
+   - Copy the resulting Client ID + Client Secret.
+   - In Supabase Studio → Authentication → Providers → GitHub: enable the
+     provider and paste the Client ID + Client Secret from the previous
+     bullet. Save.
+6. Visit the deployment URL; the first request triggers the auto-migrate
+   bootstrap (T-102) and then redirects to the GitHub login. The OAuth
+   consent screen must show "save2repo" (not "olonjs") — if it shows
+   "olonjs" your Supabase provider is still wired to the wrong OAuth App.
 
 > **Local build on Windows + WSL** is known-broken because turbopack
 > mis-evaluates the UNC root path. Use the CI/Vercel Linux build instead
