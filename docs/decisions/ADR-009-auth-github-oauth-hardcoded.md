@@ -37,7 +37,7 @@ Perché due e non una:
 2. **Brand del consent screen**: quando l'utente fa "Continue with GitHub" per save2repo, deve vedere "save2repo" come app che chiede consenso, non "olonjs".
 3. **Separazione clean tra prodotti**: jsonpages-platform e save2repo sono prodotti distinti commercialmente (vedi [ADR-001](ADR-001-fork-from-jsonpages-platform.md)); che ognuno abbia la sua OAuth App è coerente con il fork separato.
 
-L'OAuth App `save2repo` viene creata una volta sola dal team Olon (showcase setup) e le sue credenziali (Client ID + Secret) sono inserite manualmente nel Supabase Auth Providers GitHub di ciascun deployment buyer durante l'onboarding. In Phase 2 (T-202) il Marketplace install callback potrà automatizzare anche questa configurazione via Supabase Auth Admin API.
+L'OAuth App `save2repo` viene creata una volta sola dal team Olon (showcase setup) e le sue credenziali (Client ID + Secret) sono inserite manualmente nel Supabase Auth Providers GitHub di ciascun deployment buyer durante l'onboarding **del showcase manuale**. Per i buyer via Marketplace install, [T-202](../plans/save2repo-tasks.md#t-202-marketplace-callback-handler--provisioning-logic-full-zero-touch) automatizza questa configurazione via Supabase **Management API** `PATCH /v1/projects/{ref}/config/auth` con access token ottenuto via OAuth project-claim ([ADR-011](ADR-011-supabase-auth-config-write-strategy.md)). Le credenziali OAuth App `save2repo` GitHub sono centralizzate come secrets olonjs-backend ([T-A05](../plans/save2repo-tasks.md#t-a05-centralize-oauth-app-save2repo-credentials-github--supabase)).
 
 ## Alternatives Considered
 

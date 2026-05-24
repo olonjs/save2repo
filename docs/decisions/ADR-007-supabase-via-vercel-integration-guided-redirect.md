@@ -1,7 +1,7 @@
 # ADR-007: Supabase via Vercel Marketplace integration + guided redirect
 
 ## Status
-Accepted
+Accepted — **emendata da [ADR-011](ADR-011-supabase-auth-config-write-strategy.md)** sul punto "no Supabase OAuth": ADR-011 aggiunge Supabase OAuth all'install chain perché necessario per scrivere programmaticamente l'Auth config del project del buyer ([T-A04 spike](../spikes/supabase-auth-admin-spike.md)). La riga in Consequences "Da spike-are in Phase 2 implementation: verificare se il Vercel API permette programmatic install di integrations di terzi" è **closed**: no, Vercel non offre quello shortcut.
 
 ## Date
 2026-05-24

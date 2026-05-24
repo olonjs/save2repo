@@ -10,7 +10,7 @@ ADR-001..010 chiuse — vedi [`docs/decisions/`](../decisions/README.md) per det
 
 - ADR-001 fork + clean history · ADR-002 single-owner · ADR-003 Native Integration + subscription · ADR-004 BUSL 1.1 pubblico · ADR-005 save2repo only · ADR-006 GitHub App olonjs condivisa · ADR-007 Supabase Marketplace + redirect guidato · ADR-008 custom domains via Vercel API · ADR-009 GitHub OAuth hardcoded · ADR-010 template `olonjs/*` esterni
 
-ADR-011 (Supabase Auth config write strategy): **pending** — output di [T-A04 spike](save2repo-tasks.md#t-a04-spike--supabase-auth-config-write-strategy); decide Opzione A (GoTrue admin + SERVICE_ROLE_KEY) o Opzione B (Management API + Supabase OAuth, riapre ADR-007).
+ADR-011 (Supabase Auth config write strategy): **Accepted** — [Option B scelto](../decisions/ADR-011-supabase-auth-config-write-strategy.md) (Management API `PATCH /v1/projects/{ref}/config/auth` + Supabase OAuth nell'install chain). **Emenda ADR-007** che aveva rigettato Supabase OAuth. Findings di [T-A04 spike](../spikes/supabase-auth-admin-spike.md): GoTrue admin via `SERVICE_ROLE_KEY` non copre provider config; Vercel-Supabase Marketplace non offre shortcut; OAuth è l'unica via.
 
 ## Dependency graph (macro)
 

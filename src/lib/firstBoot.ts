@@ -52,6 +52,99 @@ function isPlaceholderValue(value: string | undefined): boolean {
   return false;
 }
 
+// ----------------------------------------------------------------------------
+// Bootstrap seed consumer (T-A06).
+//
+// At first login post-Marketplace-install, the deployed save2repo calls
+// jsonpages-platform's GET /api/v1/deployments/self/bootstrap with its
+// SAVE2REPO_DEPLOYMENT_TOKEN to retrieve seed data (Vercel OAuth token,
+// vercel_team_id, github_installation_id) and populate owner_integrations.
+// Idempotent + write-if-not-exists: subsequent logins no-op once populated.
+//
+// Failure modes (all non-fatal — caller must NOT block login):
+//   - token missing (showcase manual deploy or env not yet injected): skip
+//   - 401 from olonjs (unknown token): skip
+//   - 5xx / network: log + skip; UI's /settings/integrations falls back to
+//     manual "Connect Vercel" path (T-103 showcase mode).
+// ----------------------------------------------------------------------------
+
+export type BootstrapSeedResponse = {
+  vercel_oauth_token: string | null;
+  vercel_team_id: string;
+  github_installation_id: number | null;
+  supabase_auth_provider_configured: boolean;
+  correlationId?: string;
+};
+
+export async function fetchBootstrapSeed(): Promise<BootstrapSeedResponse | null> {
+  const token = process.env.SAVE2REPO_DEPLOYMENT_TOKEN?.trim();
+  if (!token) return null;
+  const base =
+    process.env.OLONJS_API_BASE?.trim() || 'https://app.olon.it/api/v1';
+  const url = `${base.replace(/\/$/, '')}/deployments/self/bootstrap`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown';
+    throw new Error(`Bootstrap fetch network error: ${message}`);
+  }
+  if (res.status === 401) return null; // showcase / stale token: non-fatal
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Bootstrap fetch ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as BootstrapSeedResponse;
+}
+
+/**
+ * Populate owner_integrations row from bootstrap seed, idempotent.
+ *
+ * Returns:
+ *   - 'skipped' if no seed (showcase manual, missing token, 401)
+ *   - 'already-seeded' if owner_integrations row exists for this user
+ *   - 'seeded' if a new row was written
+ *
+ * Throws on hard infrastructure errors (Supabase admin client missing,
+ * insert failure). The caller (auth/callback) should catch + log, never
+ * block login on seed failure.
+ */
+export async function ensureOwnerIntegrationsSeeded(
+  ownerUserId: string,
+): Promise<'skipped' | 'already-seeded' | 'seeded'> {
+  const seed = await fetchBootstrapSeed();
+  if (!seed) return 'skipped';
+  // Lazy import to avoid coupling firstBoot.ts to the Supabase client at module
+  // load time (firstBoot is read from middleware and the admin client is
+  // server-only).
+  const { getSupabaseAdmin } = await import('@/lib/supabase');
+  const supabase = getSupabaseAdmin();
+
+  const { data: existing, error: selErr } = await supabase
+    .from('owner_integrations')
+    .select('id')
+    .eq('owner_user_id', ownerUserId)
+    .maybeSingle();
+  if (selErr) {
+    throw new Error(`owner_integrations lookup failed: ${selErr.message}`);
+  }
+  if (existing) return 'already-seeded';
+
+  const { error: insErr } = await supabase.from('owner_integrations').insert({
+    owner_user_id: ownerUserId,
+    vercel_oauth_token: seed.vercel_oauth_token,
+    vercel_team_id: seed.vercel_team_id,
+    github_installation_id: seed.github_installation_id,
+  });
+  if (insErr) {
+    throw new Error(`owner_integrations insert failed: ${insErr.message}`);
+  }
+  return 'seeded';
+}
+
 export function checkDeploymentEnv(): DeploymentEnvCheck {
   const required: DeploymentEnvKey[] = [
     'NEXT_PUBLIC_SUPABASE_URL',

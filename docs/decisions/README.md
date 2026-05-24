@@ -20,3 +20,4 @@ Decisioni architettoniche di save2repo. Ogni file cattura: contesto, decisione, 
 | [ADR-008](ADR-008-custom-domains-vercel-api-only.md) | Custom domains via Vercel API (no Cloudflare automation day-1) | Accepted |
 | [ADR-009](ADR-009-auth-github-oauth-hardcoded.md) | Auth = GitHub OAuth hardcoded (single provider day-1) | Accepted |
 | [ADR-010](ADR-010-tenant-templates-external-olonjs.md) | Template tenant esterni in org `olonjs/*` | Accepted |
+| [ADR-011](ADR-011-supabase-auth-config-write-strategy.md) | Supabase Auth config write = Management API + Supabase OAuth nell'install chain (emenda ADR-007) | Accepted |
