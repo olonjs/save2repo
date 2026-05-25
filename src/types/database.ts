@@ -16,6 +16,173 @@ export type Database = {
   }
   public: {
     Tables: {
+      lead_dlq: {
+        Row: {
+          attempts: number
+          created_at: string
+          id: string
+          last_attempt_at: string
+          last_error_code: string | null
+          last_error_message: string | null
+          lead_id: string | null
+          next_retry_at: string | null
+          operation: string
+          payload: Json
+          resolved_at: string | null
+          tenant_id: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_attempt_at?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          lead_id?: string | null
+          next_retry_at?: string | null
+          operation: string
+          payload?: Json
+          resolved_at?: string | null
+          tenant_id: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          id?: string
+          last_attempt_at?: string
+          last_error_code?: string | null
+          last_error_message?: string | null
+          lead_id?: string | null
+          next_retry_at?: string | null
+          operation?: string
+          payload?: Json
+          resolved_at?: string | null
+          tenant_id?: string
+        }
+      }
+      lead_events: {
+        Row: {
+          correlation_id: string | null
+          created_at: string
+          event_name: string
+          event_status: string
+          id: string
+          idempotency_key: string | null
+          lead_id: string | null
+          payload: Json
+          tenant_id: string
+        }
+        Insert: {
+          correlation_id?: string | null
+          created_at?: string
+          event_name: string
+          event_status?: string
+          id?: string
+          idempotency_key?: string | null
+          lead_id?: string | null
+          payload?: Json
+          tenant_id: string
+        }
+        Update: {
+          correlation_id?: string | null
+          created_at?: string
+          event_name?: string
+          event_status?: string
+          id?: string
+          idempotency_key?: string | null
+          lead_id?: string | null
+          payload?: Json
+          tenant_id?: string
+        }
+      }
+      lead_webhook_events: {
+        Row: {
+          delivery_status: string | null
+          event_type: string
+          id: string
+          payload: Json
+          processed_at: string | null
+          received_at: string
+          resend_id: string | null
+          webhook_event_key: string
+        }
+        Insert: {
+          delivery_status?: string | null
+          event_type: string
+          id?: string
+          payload?: Json
+          processed_at?: string | null
+          received_at?: string
+          resend_id?: string | null
+          webhook_event_key: string
+        }
+        Update: {
+          delivery_status?: string | null
+          event_type?: string
+          id?: string
+          payload?: Json
+          processed_at?: string | null
+          received_at?: string
+          resend_id?: string | null
+          webhook_event_key?: string
+        }
+      }
+      leads: {
+        Row: {
+          correlation_id: string | null
+          created_at: string
+          data: Json
+          delivery_status: string
+          github_commit_sha: string | null
+          github_path: string | null
+          id: string
+          idempotency_key: string | null
+          last_error_code: string | null
+          last_error_message: string | null
+          resend_id: string | null
+          source_ip: unknown
+          storage_mode: string
+          tenant_id: string
+          updated_at: string
+          user_agent: string | null
+        }
+        Insert: {
+          correlation_id?: string | null
+          created_at?: string
+          data?: Json
+          delivery_status?: string
+          github_commit_sha?: string | null
+          github_path?: string | null
+          id?: string
+          idempotency_key?: string | null
+          last_error_code?: string | null
+          last_error_message?: string | null
+          resend_id?: string | null
+          source_ip?: unknown
+          storage_mode?: string
+          tenant_id: string
+          updated_at?: string
+          user_agent?: string | null
+        }
+        Update: {
+          correlation_id?: string | null
+          created_at?: string
+          data?: Json
+          delivery_status?: string
+          github_commit_sha?: string | null
+          github_path?: string | null
+          id?: string
+          idempotency_key?: string | null
+          last_error_code?: string | null
+          last_error_message?: string | null
+          resend_id?: string | null
+          source_ip?: unknown
+          storage_mode?: string
+          tenant_id?: string
+          updated_at?: string
+          user_agent?: string | null
+        }
+      }
       owner_integrations: {
         Row: {
           github_account_login: string | null
@@ -131,6 +298,7 @@ export type Database = {
           github_repo_name: string | null
           id: string
           owner_user_id: string
+          public_form_key: string | null
           slug: string
           status: string
           template_repo: string | null
@@ -151,6 +319,7 @@ export type Database = {
           github_repo_name?: string | null
           id?: string
           owner_user_id: string
+          public_form_key?: string | null
           slug: string
           status?: string
           template_repo?: string | null
@@ -171,6 +340,7 @@ export type Database = {
           github_repo_name?: string | null
           id?: string
           owner_user_id?: string
+          public_form_key?: string | null
           slug?: string
           status?: string
           template_repo?: string | null
@@ -221,3 +391,5 @@ export type OwnerIntegrationsRow = Tables<"owner_integrations">
 export type TenantAgentCredentialRow = Tables<"tenant_agent_credentials">
 export type TenantDomainRow = Tables<"tenant_domains">
 export type UserRow = Tables<"users">
+export type LeadRow = Tables<"leads">
+export type LeadEventRow = Tables<"lead_events">
