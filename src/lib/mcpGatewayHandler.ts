@@ -298,11 +298,60 @@ export async function handleMcpJsonRpc(params: {
       );
     }
 
-    // update-section: minor mutation helper. Phase 0 stub until T-110 slice 3
-    // adds the structured page schema parser. Agents can already round-trip
-    // via read-content → mutate JSON client-side → cold-save.
+    // update-section: read → mutate section by id → write. Assumes the olonjs
+    // page schema convention `{ sections: [{ id, ... }, ...] }`. Templates
+    // that use a different structure should round-trip via read-content +
+    // cold-save manually.
     if (toolName === "update-section") {
-      return notImplemented(id, toolName, correlationId);
+      if (!hasScope(context.credential.scopes, "write")) {
+        return NextResponse.json(err(id, -32003, "Forbidden: missing write scope"), { status: 403, headers: mcpCorsHeaders });
+      }
+      const args = (body.params?.arguments as Record<string, unknown> | undefined) ?? {};
+      const slug = (typeof args.slug === "string" && args.slug.trim()) ? args.slug.trim() : "home";
+      const sectionId = typeof args.sectionId === "string" ? args.sectionId : "";
+      const sectionData = args.data;
+      if (!sectionId || typeof sectionData !== "object" || sectionData === null) {
+        return NextResponse.json(err(id, -32602, "Missing arguments.sectionId (string) or arguments.data (object)"), { status: 400, headers: mcpCorsHeaders });
+      }
+      const filePath = `pages/${slug}.jsp.json`;
+      const repoCtx = await resolveTenantRepoContext(context.tenant.id);
+      if (!repoCtx.ok) {
+        return NextResponse.json(err(id, -32000, repoCtx.error, { code: repoCtx.code, correlationId }), { status: 409, headers: mcpCorsHeaders });
+      }
+      try {
+        const current = await readContent(repoCtx.installationId, repoCtx.owner, repoCtx.repo, filePath);
+        let page: { sections?: Array<Record<string, unknown>> };
+        try {
+          page = JSON.parse(current.content);
+        } catch {
+          return NextResponse.json(err(id, -32000, `Page ${filePath} is not valid JSON`, { code: "ERR_PAGE_NOT_JSON", correlationId }), { status: 500, headers: mcpCorsHeaders });
+        }
+        const sections = Array.isArray(page?.sections) ? page.sections : null;
+        if (!sections) {
+          return NextResponse.json(err(id, -32000, `Page ${filePath} has no sections array`, { code: "ERR_PAGE_NO_SECTIONS", correlationId }), { status: 409, headers: mcpCorsHeaders });
+        }
+        const idx = sections.findIndex((s) => typeof s?.id === "string" && s.id === sectionId);
+        if (idx < 0) {
+          return NextResponse.json(err(id, -32000, `Section ${sectionId} not found in ${filePath}`, { code: "ERR_SECTION_NOT_FOUND", correlationId }), { status: 404, headers: mcpCorsHeaders });
+        }
+        sections[idx] = { ...sections[idx], ...(sectionData as Record<string, unknown>), id: sectionId };
+        const newContent = JSON.stringify({ ...page, sections }, null, 2);
+        const written = await writeContent(repoCtx.installationId, repoCtx.owner, repoCtx.repo, filePath, {
+          content: newContent,
+          message: `Update section ${sectionId} on ${slug} via MCP (credential ${context.credential.label})`,
+          sha: current.sha,
+        });
+        return NextResponse.json(
+          ok(id, {
+            content: [
+              { type: "text", text: JSON.stringify({ path: filePath, sectionId, sha: written.sha, correlationId }, null, 2) },
+            ],
+          }),
+          { headers: mcpCorsHeaders }
+        );
+      } catch (toolErr) {
+        return mcpToolError(id, toolErr, correlationId);
+      }
     }
 
     return NextResponse.json(err(id, -32601, `Unknown tool: ${toolName}`), {
