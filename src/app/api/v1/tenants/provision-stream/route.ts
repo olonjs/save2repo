@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { generateKeyPairSync, createPublicKey } from "crypto";
 import { requireRequestUser } from "@/lib/serverAuth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import {
@@ -290,6 +291,31 @@ async function runProvisioning(params: {
     return;
   }
 
+  // ----- Admin keypair bootstrap (ADR-002, parent parity) -----
+  // Generate EC P-256 keypair so the Admin button in Overview works from
+  // first boot — no manual "Generate Keypair" step in Settings. Failure
+  // here is non-fatal: provision continues, owner can generate later via
+  // POST /api/v1/tenants/[id]/admin-keypair.
+  let adminPrivateKey: string | null = null;
+  let adminPublicKey: string | null = null;
+  try {
+    const pair = generateKeyPairSync("ec", {
+      namedCurve: "P-256",
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    createPublicKey(pair.publicKey);
+    adminPrivateKey = pair.privateKey;
+    adminPublicKey = pair.publicKey;
+    emit({ type: "log", message: "Admin keypair generated (EC P-256)" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown";
+    emit({
+      type: "log",
+      message: `WARN: admin keypair generation skipped (${message}); configurable from Settings later.`,
+    });
+  }
+
   // ----- Vercel: set env vars -----
   emit({ type: "step", id: "vercel-env", label: "Injecting tenant env" });
   try {
@@ -314,6 +340,18 @@ async function runProvisioning(params: {
             type: "encrypted",
             target: ["production", "preview", "development"],
           },
+          // ADR-002 + parent parity: ADMIN_PUBLIC_KEY at provision time so the
+          // Admin button in Overview works first boot, no Settings step.
+          ...(adminPublicKey
+            ? [
+                {
+                  key: "ADMIN_PUBLIC_KEY",
+                  value: adminPublicKey,
+                  type: "encrypted" as const,
+                  target: ["production", "preview", "development"] as const,
+                },
+              ]
+            : []),
           // VITE_JSONPAGES_API_KEY is deferred to T-110 once MCP credentials
           // are assigned for this tenant.
         ]),
@@ -428,6 +466,8 @@ async function runProvisioning(params: {
         vercel_url: deployUrl,
         vercel_public_url: `https://${slug}.vercel.app`,
         public_form_key: publicFormKey,
+        admin_private_key: adminPrivateKey,
+        admin_public_key: adminPublicKey,
       })
       .select("id")
       .single<{ id: string }>();
