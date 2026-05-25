@@ -1,352 +1,1060 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  AlertCircle,
-  ArrowLeft,
-  Check,
-  Copy,
-  ExternalLink,
-  Github,
-  Globe,
-  KeyRound,
-  Loader2,
-  Pencil,
-  Plug,
-  Trash2,
-} from "lucide-react";
-import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DomainsPanel } from "@/app/dashboard/components/domains/DomainsPanel";
 import { LeadsPanel } from "@/app/dashboard/components/leads/LeadsPanel";
 import { AgentsPanel } from "@/app/dashboard/components/agents/AgentsPanel";
-import { SettingsPanel } from "@/app/dashboard/components/settings/SettingsPanel";
-import type { TenantRow } from "@/types/database";
+import {
+  ArrowLeft,
+  Globe,
+  GitBranch,
+  CreditCard,
+  Inbox,
+  Copy,
+  Check,
+  Loader2,
+  Database,
+  Settings,
+  X,
+  Plug,
+  Lock,
+} from "lucide-react";
 
-// ----------------------------------------------------------------------------
-// /dashboard/[id]?tab=<overview|domains|leads|agents|settings>  (T-113)
-//
-// Single-owner tenant detail shell. Replaces the 1158-line parent code that
-// carried 5+ tabs depending on routes deleted in T-003/T-004 (Snapshot,
-// Cold-save, HotSave Overview buttons, Leads pre-T-114, Billing entirely).
-//
-// Layout:
-//   header     ← slug · status badge · external links · actions
-//   tab nav    ← Overview · Domains · Leads · Agents · Settings
-//   tab body   ← per-tab content
-//
-// Stripped vs parent:
-//   - Billing tab (out of scope, ADR-003 — Vercel Marketplace native billing)
-//   - Snapshot / Cold-save / HotSave buttons in Overview (ADR-005 — save = commit)
-//   - LemonSqueezy entitlements / subscribe flow
-//   - Preview-bootstrap polling loop
-//
-// Tab readiness (per save2repo-tasks.md Phase 1):
-//   Overview ✓ (this file)
-//   Domains  ✓ (DomainsPanel + T-109 routes)
-//   Leads    ⚠ placeholder until T-114 backend restore
-//   Agents   ⚠ placeholder until T-110 MCP lands
-//   Settings ⚠ placeholder until T-116 lands
-// ----------------------------------------------------------------------------
+interface Tenant {
+  id: string;
+  // DB column is display_name (nullable). The original parent used `name`; we
+  // map display_name -> name in the fetch so the rest of the file stays
+  // identical to jsonpages-platform.
+  name: string;
+  slug: string;
+  vercel_url?: string | null;
+  vercel_public_url?: string | null;
+  // Save2repo schema (src/types/database.ts): github_owner_login, not
+  // github_repo_owner. github_installation_id is on owner_integrations, not
+  // here — fetched separately when needed.
+  github_owner_login: string | null;
+  github_repo_name: string | null;
+  vercel_project_id?: string | null;
+  admin_private_key?: string | null;
+  status?: string;
+  created_at?: string;
+}
 
-type Tab = "overview" | "domains" | "leads" | "agents" | "settings";
+type BillingSummary = {
+  planCode: "starter" | "pro" | "business" | null;
+  status: "active" | "past_due" | "unknown";
+  renewalAt: string | null;
+  currentPeriodEnd: string | null;
+  entitlementCount: number;
+  canManageBilling: boolean;
+};
 
-const TABS: { id: Tab; label: string; icon: React.ComponentType<{ size?: number }>; ready: boolean; placeholder?: string }[] = [
-  { id: "overview", label: "Overview", icon: Globe, ready: true },
-  { id: "domains", label: "Domains", icon: Globe, ready: true },
-  { id: "leads", label: "Leads", icon: AlertCircle, ready: true },
-  { id: "agents", label: "Agents", icon: Plug, ready: true },
-  { id: "settings", label: "Settings", icon: KeyRound, ready: true },
+type SnapshotStepId = "gather_repo" | "map_content" | "write_store" | "finalize";
+type SnapshotStepStatus = "idle" | "running" | "done" | "error";
+type SnapshotStepState = { id: SnapshotStepId; label: string; status: SnapshotStepStatus };
+
+const SNAPSHOT_STEPS: SnapshotStepState[] = [
+  { id: "gather_repo", label: "Lettura repository", status: "idle" },
+  { id: "map_content", label: "Mapping contenuti", status: "idle" },
+  { id: "write_store", label: "Scrittura su Supabase", status: "idle" },
+  { id: "finalize", label: "Finalize", status: "idle" },
 ];
 
-function isTab(value: string | null): value is Tab {
-  return value === "overview" || value === "domains" || value === "leads" || value === "agents" || value === "settings";
-}
+type ColdSaveStepId = "gather_store" | "commit" | "build" | "live";
+type ColdSaveStepState = { id: ColdSaveStepId; label: string; status: SnapshotStepStatus };
 
-export default function TenantDetailPage() {
-  const params = useParams<{ id: string }>();
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const tenantId = params.id;
-  const activeTab: Tab = isTab(searchParams.get("tab")) ? (searchParams.get("tab") as Tab) : "overview";
+const COLD_SAVE_STEPS: ColdSaveStepState[] = [
+  { id: "gather_store", label: "Lettura Supabase store", status: "idle" },
+  { id: "commit", label: "Commit su GitHub", status: "idle" },
+  { id: "build", label: "Build Vercel", status: "idle" },
+  { id: "live", label: "Deploy live", status: "idle" },
+];
 
-  const [user, setUser] = useState<User | null>(null);
-  const [tenant, setTenant] = useState<TenantRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+type SseEventRecord = { event: string; data: string };
 
-  // ----- Init + fetch -----
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: { user: authedUser } } = await supabase.auth.getUser();
-      if (!authedUser) {
-        router.push("/");
-        return;
-      }
-      if (cancelled) return;
-      setUser(authedUser);
-      const { data, error } = await supabase
-        .from("tenants")
-        .select("*")
-        .eq("id", tenantId)
-        .eq("owner_user_id", authedUser.id)
-        .maybeSingle<TenantRow>();
-      if (cancelled) return;
-      if (error || !data) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-      setTenant(data);
-      setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, router]);
-
-  const setTab = useCallback(
-    (tab: Tab) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set("tab", tab);
-      router.replace(`/dashboard/${tenantId}?${params.toString()}`);
-    },
-    [tenantId, router, searchParams],
-  );
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center font-mono text-sm text-muted-foreground">
-        <Loader2 size={18} className="mr-2 animate-spin" /> Loading…
-      </div>
-    );
+function parseSseChunk(chunk: string): SseEventRecord[] {
+  const blocks = chunk.split("\n\n");
+  const events: SseEventRecord[] = [];
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const lines = trimmed.split("\n");
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    events.push({ event, data: dataLines.join("\n") });
   }
-
-  if (notFound || !tenant) {
-    return (
-      <div className="mx-auto w-full max-w-screen-xl px-5 py-10">
-        <p className="text-sm text-muted-foreground">Project not found, or not owned by the current user.</p>
-        <Link href="/dashboard" className="mt-4 inline-flex items-center gap-1 text-sm text-primary hover:underline">
-          <ArrowLeft size={14} /> Back to projects
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto w-full max-w-screen-xl px-5 py-8">
-      <TenantHeader tenant={tenant} />
-      <TabBar active={activeTab} onChange={setTab} />
-      <div className="mt-6">
-        {activeTab === "overview" ? (
-          <OverviewTab tenant={tenant} />
-        ) : activeTab === "domains" ? (
-          <DomainsPanel tenantId={tenant.id} />
-        ) : activeTab === "leads" ? (
-          <LeadsPanel tenantId={tenant.id} />
-        ) : activeTab === "agents" ? (
-          <AgentsPanel tenantId={tenant.id} tenantSlug={tenant.slug} />
-        ) : activeTab === "settings" ? (
-          <SettingsPanel tenant={tenant} />
-        ) : (
-          <PlaceholderTab tab={activeTab} />
-        )}
-      </div>
-    </div>
-  );
+  return events;
 }
 
-// ---------------------------------------------------------------------------- header
+const TABS = [
+  { id: "overview", label: "Overview", icon: Globe },
+  { id: "domains", label: "Domains", icon: Globe },
+  { id: "leads", label: "Leads", icon: Inbox },
+  { id: "agents", label: "API/Agents", icon: Plug },
+  { id: "settings", label: "Settings", icon: Settings },
+] as const;
 
-function StatusBadge({ status }: { status: string }) {
-  const colour =
-    status === "ready"
-      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-      : status === "provisioning"
-        ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
-        : "bg-muted text-muted-foreground";
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${colour}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" /> {status}
-    </span>
-  );
-}
-
-function TenantHeader({ tenant }: { tenant: TenantRow }) {
-  return (
-    <header className="flex items-start justify-between gap-4">
-      <div className="space-y-1.5">
-        <Link href="/dashboard" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={12} /> Back to projects
-        </Link>
-        <div className="flex items-center gap-3">
-          <h1 className="font-display text-2xl tracking-tight">{tenant.display_name || tenant.slug}</h1>
-          <StatusBadge status={tenant.status} />
-        </div>
-        <p className="font-mono text-xs text-muted-foreground">{tenant.slug}</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Link
-          href={`/dashboard/${tenant.id}/edit`}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm hover:border-ring/50 hover:bg-card/70"
-        >
-          <Pencil size={14} /> Edit
-        </Link>
-      </div>
-    </header>
-  );
-}
-
-// ---------------------------------------------------------------------------- tab bar
-
-function TabBar({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
-  return (
-    <nav className="mt-6 flex flex-wrap items-center gap-1 border-b border-border">
-      {TABS.map((t) => {
-        const isActive = active === t.id;
-        return (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => onChange(t.id)}
-            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition ${
-              isActive
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <t.icon size={14} />
-            {t.label}
-            {!t.ready ? (
-              <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">soon</span>
-            ) : null}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-// ---------------------------------------------------------------------------- overview tab
-
-function OverviewTab({ tenant }: { tenant: TenantRow }) {
-  const publicUrl = tenant.vercel_public_url || tenant.vercel_url || null;
-  const repoLabel =
-    tenant.github_owner_login && tenant.github_repo_name
-      ? `${tenant.github_owner_login}/${tenant.github_repo_name}`
-      : null;
-  const repoUrl = repoLabel ? `https://github.com/${repoLabel}` : null;
-  const createdAt = tenant.created_at ? new Date(tenant.created_at).toLocaleString() : "—";
-
-  return (
-    <div className="space-y-4">
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Card title="Live site" icon={Globe}>
-          {publicUrl ? (
-            <ExternalLinkRow href={publicUrl} label={publicUrl.replace(/^https?:\/\//, "")} />
-          ) : (
-            <Muted>Not deployed yet.</Muted>
-          )}
-        </Card>
-        <Card title="GitHub repository" icon={Github}>
-          {repoUrl ? (
-            <ExternalLinkRow href={repoUrl} label={repoLabel!} />
-          ) : (
-            <Muted>No repository linked.</Muted>
-          )}
-        </Card>
-      </section>
-      <section className="rounded-lg border border-border bg-card/40 p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Details</h2>
-        <dl className="mt-3 grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[auto,1fr] sm:gap-x-6">
-          <Detail label="ID" value={tenant.id} mono />
-          <Detail label="Slug" value={tenant.slug} mono />
-          <Detail label="Deployment target" value={tenant.deployment_target} />
-          <Detail label="Status" value={tenant.status} />
-          <Detail label="Vercel project" value={tenant.vercel_project_id || "—"} mono />
-          <Detail label="GitHub repo id" value={tenant.github_repo_id?.toString() || "—"} mono />
-          <Detail label="Created" value={createdAt} />
-        </dl>
-      </section>
-    </div>
-  );
-}
-
-function Card({ title, icon: Icon, children }: { title: string; icon: React.ComponentType<{ size?: number }>; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border bg-card/40 p-5">
-      <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        <Icon size={14} /> {title}
-      </h2>
-      <div className="mt-3">{children}</div>
-    </div>
-  );
-}
-
-function ExternalLinkRow({ href, label }: { href: string; label: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1.5 font-mono text-sm text-primary hover:underline"
-      >
-        {label} <ExternalLink size={12} />
-      </a>
-      <CopyButton text={href} />
-    </div>
-  );
-}
-
-function Detail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <>
-      <dt className="text-muted-foreground sm:py-0.5">{label}</dt>
-      <dd className={`${mono ? "font-mono" : ""} break-all sm:py-0.5`}>{value}</dd>
-    </>
-  );
-}
-
-function Muted({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-muted-foreground">{children}</p>;
-}
-
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, size = 14 }: { text: string; size?: number }) {
   const [copied, setCopied] = useState(false);
+  const handle = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <button
       type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        } catch {
-          /* clipboard denied */
-        }
-      }}
-      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-      aria-label="Copy"
+      onClick={handle}
+      title="Copia"
+      className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
     >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? <Check size={size} /> : <Copy size={size} />}
     </button>
   );
 }
 
-// ---------------------------------------------------------------------------- placeholder for not-yet-ready tabs
+export default function ProjectDetailPage() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const id = params?.id as string;
+  const tabFromUrl = searchParams?.get("tab") || "overview";
+  const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<string>(tabFromUrl);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingPortalLoading, setBillingPortalLoading] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [snapshotRunning, setSnapshotRunning] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [snapshotCorrelationId, setSnapshotCorrelationId] = useState<string | null>(null);
+  const [snapshotLogs, setSnapshotLogs] = useState<string[]>([]);
+  const [snapshotSteps, setSnapshotSteps] = useState<SnapshotStepState[]>(SNAPSHOT_STEPS);
+  const [snapshotResult, setSnapshotResult] = useState<{
+    entitiesWritten: number;
+    pagesWritten: number;
+    configWritten: number;
+  } | null>(null);
+  const [coldSaveOpen, setColdSaveOpen] = useState(false);
+  const [coldSaveRunning, setColdSaveRunning] = useState(false);
+  const [coldSaveError, setColdSaveError] = useState<string | null>(null);
+  const [coldSaveCorrelationId, setColdSaveCorrelationId] = useState<string | null>(null);
+  const [coldSaveLogs, setColdSaveLogs] = useState<string[]>([]);
+  const [coldSaveSteps, setColdSaveSteps] = useState<ColdSaveStepState[]>(COLD_SAVE_STEPS);
+  const [coldSaveResult, setColdSaveResult] = useState<{
+    filesWritten: number;
+    deployUrl?: string;
+    commitSha?: string;
+  } | null>(null);
+  const [generatingKeypair, setGeneratingKeypair] = useState(false);
+  const [generatedPublicKey, setGeneratedPublicKey] = useState<string | null>(null);
+  const [keypairError, setKeypairError] = useState<string | null>(null);
+  const [adminAccessLoading, setAdminAccessLoading] = useState(false);
+  const [adminAccessError, setAdminAccessError] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteIdempotencyKeyRef = useRef<string | null>(null);
 
-function PlaceholderTab({ tab }: { tab: Tab }) {
-  const meta = TABS.find((t) => t.id === tab);
+  useEffect(() => {
+    setActiveTab(tabFromUrl);
+  }, [tabFromUrl]);
+
+  useEffect(() => {
+    if (!id) return;
+    const fetchTenant = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/");
+        return;
+      }
+      const { data, error } = await supabase
+        .from("tenants")
+        .select("*")
+        .eq("id", id)
+        .eq("owner_user_id", user.id)
+        .single();
+      if (error || !data) {
+        setTenant(null);
+        setLoading(false);
+        return;
+      }
+      const row = data as Record<string, unknown>;
+      setTenant({
+        ...(row as object),
+        // DB column display_name -> local Tenant.name (fallback to slug).
+        name:
+          (typeof row.display_name === "string" ? row.display_name : null) ??
+          (typeof row.slug === "string" ? row.slug : ""),
+      } as Tenant);
+      setLoading(false);
+    };
+    fetchTenant();
+  }, [id, router]);
+
+  const loadBillingSummary = useCallback(async () => {
+    if (!tenant?.id) return;
+    setBillingLoading(true);
+    setBillingError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        throw new Error("Sessione assente o scaduta");
+      }
+      const url = new URL("/api/v1/licensing/subscription-summary", window.location.origin);
+      url.searchParams.set("tenant_id", tenant.id);
+      url.searchParams.set("correlation_id", crypto.randomUUID());
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Correlation-Id": crypto.randomUUID(),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Errore caricamento subscription");
+      }
+      setBillingSummary({
+        planCode:
+          data.planCode === "business" || data.planCode === "pro" || data.planCode === "starter"
+            ? data.planCode
+            : null,
+        status: data.status === "active" || data.status === "past_due" ? data.status : "unknown",
+        renewalAt: typeof data.renewalAt === "string" ? data.renewalAt : null,
+        currentPeriodEnd: typeof data.currentPeriodEnd === "string" ? data.currentPeriodEnd : null,
+        entitlementCount: Number.isFinite(data.entitlementCount) ? Number(data.entitlementCount) : 0,
+        canManageBilling: Boolean(data.canManageBilling),
+      });
+    } catch (error: any) {
+      setBillingError(error?.message || "Errore durante il caricamento subscription");
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [tenant?.id]);
+
+  const handleManageBilling = useCallback(async () => {
+    if (!tenant?.id || billingPortalLoading) return;
+    setBillingPortalLoading(true);
+    setBillingError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        throw new Error("Sessione assente o scaduta");
+      }
+      const url = new URL("/api/v1/licensing/portal", window.location.origin);
+      url.searchParams.set("tenant_id", tenant.id);
+      url.searchParams.set("correlation_id", crypto.randomUUID());
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Correlation-Id": crypto.randomUUID(),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || typeof data.portalUrl !== "string") {
+        throw new Error(data.error || "Portal billing non disponibile");
+      }
+      window.location.href = data.portalUrl;
+    } catch (error: any) {
+      setBillingError(error?.message || "Impossibile aprire il billing portal");
+    } finally {
+      setBillingPortalLoading(false);
+    }
+  }, [tenant?.id, billingPortalLoading]);
+
+  // Billing tab effetto rimosso: ADR-003 esclude LemonSqueezy da save2repo.
+  // Il tab Billing è stato strippato; URL stale con ?tab=billing non fa nulla.
+
+  const setTab = (tab: string) => {
+    setActiveTab(tab);
+    const u = new URLSearchParams(searchParams?.toString() || "");
+    u.set("tab", tab);
+    router.replace(`/dashboard/${id}?${u.toString()}`, { scroll: false });
+  };
+
+  const runHotSaveSnapshot = useCallback(async () => {
+    if (!tenant?.id || snapshotRunning) return;
+    setSnapshotOpen(true);
+    setSnapshotRunning(true);
+    setSnapshotError(null);
+    setSnapshotCorrelationId(null);
+    setSnapshotLogs([]);
+    setSnapshotResult(null);
+    setSnapshotSteps(SNAPSHOT_STEPS.map((step) => ({ ...step, status: "idle" })));
+
+    const appendLog = (line: string) => {
+      setSnapshotLogs((prev) => [...prev, line]);
+    };
+    const markStep = (stepId: SnapshotStepId, status: SnapshotStepStatus) => {
+      setSnapshotSteps((prev) =>
+        prev.map((step) => (step.id === stepId ? { ...step, status } : step))
+      );
+    };
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("Sessione assente o scaduta");
+      const correlationId = crypto.randomUUID();
+      setSnapshotCorrelationId(correlationId);
+
+      const res = await fetch(`/api/v1/tenants/${tenant.id}/save2edge-snapshot`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "X-Correlation-Id": correlationId,
+        },
+      });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let doneReceived = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) buffer += decoder.decode();
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const records = parseSseChunk(part + "\n\n");
+          for (const record of records) {
+            const data = (() => {
+              try {
+                return JSON.parse(record.data) as Record<string, unknown>;
+              } catch {
+                return {};
+              }
+            })();
+            if (record.event === "step") {
+              const stepId = data.id as SnapshotStepId;
+              const status = data.status as SnapshotStepStatus;
+              if (stepId && status) {
+                markStep(stepId, status);
+              }
+            } else if (record.event === "log") {
+              const message = typeof data.message === "string" ? data.message : "log";
+              appendLog(message);
+            } else if (record.event === "error") {
+              const message = typeof data.message === "string" ? data.message : "Snapshot failed";
+              const cid = typeof data.correlationId === "string" ? data.correlationId : null;
+              if (cid) setSnapshotCorrelationId(cid);
+              appendLog(`ERROR: ${message}`);
+              setSnapshotError(message);
+              const stepId = data.stepId as SnapshotStepId | undefined;
+              if (stepId) markStep(stepId, "error");
+            } else if (record.event === "done") {
+              doneReceived = true;
+              setSnapshotResult({
+                entitiesWritten: Number(data.entitiesWritten ?? 0),
+                pagesWritten: Number(data.pagesWritten ?? 0),
+                configWritten: Number(data.configWritten ?? 0),
+              });
+              appendLog("Snapshot completato.");
+            }
+          }
+        }
+        if (done) break;
+      }
+      if (!doneReceived && !snapshotError) {
+        setSnapshotError("Stream terminato senza evento finale.");
+      }
+    } catch (error: any) {
+      setSnapshotError(error?.message || "Errore durante HotSave snapshot");
+    } finally {
+      setSnapshotRunning(false);
+    }
+  }, [tenant?.id, snapshotRunning, snapshotError]);
+
+  const runColdSave = useCallback(async () => {
+    if (!tenant?.id || coldSaveRunning) return;
+    setColdSaveOpen(true);
+    setColdSaveRunning(true);
+    setColdSaveError(null);
+    setColdSaveCorrelationId(null);
+    setColdSaveLogs([]);
+    setColdSaveResult(null);
+    setColdSaveSteps(COLD_SAVE_STEPS.map((step) => ({ ...step, status: "idle" })));
+
+    const appendLog = (line: string) => {
+      setColdSaveLogs((prev) => [...prev, line]);
+    };
+    const markStep = (stepId: ColdSaveStepId, status: SnapshotStepStatus) => {
+      setColdSaveSteps((prev) => prev.map((step) => (step.id === stepId ? { ...step, status } : step)));
+    };
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error("Sessione assente o scaduta");
+      const correlationId = crypto.randomUUID();
+      setColdSaveCorrelationId(correlationId);
+
+      const res = await fetch(`/api/v1/tenants/${tenant.id}/cold-save`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "X-Correlation-Id": correlationId,
+        },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let doneReceived = false;
+      let streamErrored = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        if (done) buffer += decoder.decode();
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const records = parseSseChunk(part + "\n\n");
+          for (const record of records) {
+            const data = (() => {
+              try {
+                return JSON.parse(record.data) as Record<string, unknown>;
+              } catch {
+                return {};
+              }
+            })();
+            if (record.event === "step") {
+              const stepId = data.id as ColdSaveStepId;
+              const status = data.status as SnapshotStepStatus;
+              if (stepId && status) {
+                markStep(stepId, status);
+              }
+            } else if (record.event === "log") {
+              const message = typeof data.message === "string" ? data.message : "log";
+              appendLog(message);
+            } else if (record.event === "error") {
+              streamErrored = true;
+              const message = typeof data.message === "string" ? data.message : "Cold save failed";
+              const cid = typeof data.correlationId === "string" ? data.correlationId : null;
+              if (cid) setColdSaveCorrelationId(cid);
+              appendLog(`ERROR: ${message}`);
+              setColdSaveError(message);
+              const stepId = data.stepId as ColdSaveStepId | undefined;
+              if (stepId) markStep(stepId, "error");
+            } else if (record.event === "done") {
+              doneReceived = true;
+              const filesWritten = Number(data.filesWritten ?? 0);
+              const deployUrl = typeof data.deployUrl === "string" ? data.deployUrl : undefined;
+              const commitSha = typeof data.commitSha === "string" ? data.commitSha : undefined;
+              setColdSaveResult({ filesWritten, deployUrl, commitSha });
+              if (deployUrl) {
+                setTenant((prev) => (prev ? { ...prev, vercel_url: deployUrl } : prev));
+              }
+              appendLog("Cold save completato.");
+            }
+          }
+        }
+        if (done) break;
+      }
+      if (!doneReceived && !streamErrored) {
+        setColdSaveError("Stream terminato senza evento finale.");
+      }
+    } catch (error: unknown) {
+      setColdSaveError(error instanceof Error ? error.message : "Errore durante Cold save");
+    } finally {
+      setColdSaveRunning(false);
+    }
+  }, [tenant?.id, coldSaveRunning]);
+
+  const handleGenerateKeypair = useCallback(async () => {
+    if (!tenant?.id || generatingKeypair) return;
+    setGeneratingKeypair(true);
+    setGeneratedPublicKey(null);
+    setKeypairError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Sessione assente o scaduta");
+      const res = await fetch(`/api/v1/tenants/${tenant.id}/admin-keypair`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "X-Correlation-Id": crypto.randomUUID(),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setGeneratedPublicKey(data.publicKey as string);
+      setTenant((prev) => prev ? { ...prev, admin_private_key: "configured" } : prev);
+    } catch (error: unknown) {
+      setKeypairError(error instanceof Error ? error.message : "Errore generazione keypair");
+    } finally {
+      setGeneratingKeypair(false);
+    }
+  }, [tenant?.id, generatingKeypair]);
+
+  const handleDeleteProject = useCallback(async () => {
+    if (!tenant?.id || deleteLoading) return;
+    setDeleteError(null);
+    if (deleteConfirmText.trim() !== tenant.slug) {
+      setDeleteError(`Scrivi esattamente lo slug "${tenant.slug}" per confermare.`);
+      return;
+    }
+    const confirmed = window.confirm(
+      `Eliminare definitivamente il progetto "${tenant.name}"? Questa azione non puo essere annullata.`
+    );
+    if (!confirmed) return;
+
+    setDeleteLoading(true);
+    try {
+      if (!deleteIdempotencyKeyRef.current) {
+        deleteIdempotencyKeyRef.current = crypto.randomUUID();
+      }
+      const idempotencyKey = deleteIdempotencyKeyRef.current;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        throw new Error("Sessione assente o scaduta");
+      }
+      const res = await fetch(`/api/v1/tenants/${tenant.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "X-Correlation-Id": crypto.randomUUID(),
+          "Idempotency-Key": idempotencyKey,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Delete progetto fallita");
+      }
+      router.push("/dashboard");
+    } catch (error: any) {
+      setDeleteError(error?.message || "Errore durante eliminazione progetto");
+    } finally {
+      deleteIdempotencyKeyRef.current = null;
+      setDeleteLoading(false);
+    }
+  }, [tenant, deleteConfirmText, deleteLoading, router]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-muted-foreground">
+        <Loader2 className="animate-spin size-6" />
+      </div>
+    );
+  }
+
+  if (!tenant) {
+    return (
+      <div className="p-10">
+        <p className="text-muted-foreground">Progetto non trovato.</p>
+        <Link href="/dashboard" className="mt-4 inline-flex items-center gap-2 text-sm text-primary-light hover:underline">
+          <ArrowLeft size={14} /> Torna ai progetti
+        </Link>
+      </div>
+    );
+  }
+
+  const deploymentUrl = tenant.vercel_url || "";
+  const publicUrl = tenant.vercel_public_url || "";
+  const billingStatus = billingSummary?.status ?? "unknown";
+  const billingStatusLabel =
+    billingStatus === "active" ? "Active" : billingStatus === "past_due" ? "Past Due" : "Unknown";
+  const billingStatusClass =
+    billingStatus === "active"
+      ? "border-success-border bg-success text-success-foreground"
+      : billingStatus === "past_due"
+        ? "border-warning-border bg-warning text-warning-foreground"
+        : "border-border bg-elevated text-muted-foreground";
+
   return (
-    <div className="rounded-lg border border-dashed border-border bg-card/30 p-12 text-center">
-      <p className="text-sm text-muted-foreground">{meta?.placeholder ?? "Tab not implemented yet."}</p>
+    <div className="mx-auto max-w-screen-xl px-5 py-10">
+      <div className="flex items-center gap-4 mb-8">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft size={16} /> Projects
+        </Link>
+        <span className="text-border-strong">/</span>
+        <h1 className="text-xl font-display truncate">{tenant.name}</h1>
+        
+      </div>
+
+      <nav className="flex gap-1 border-b border-border mb-8">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors ${
+              activeTab === t.id
+                ? "bg-elevated text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-elevated"
+            }`}
+          >
+            <t.icon size={14} />
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === "overview" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <div>
+            <h2 className="text-lg font-semibold mb-2">{tenant.name}</h2>
+            <p className="text-sm text-muted-foreground font-mono">
+              {publicUrl || deploymentUrl || "URL non disponibile"}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="border border-border rounded-lg p-4">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <GitBranch size={14} /> Repository
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <a
+                  href={`https://github.com/${tenant.github_owner_login}/${tenant.github_repo_name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-sm text-primary-light hover:underline truncate"
+                >
+                  {tenant.github_owner_login}/{tenant.github_repo_name}
+                </a>
+                <CopyButton text={`${tenant.github_owner_login}/${tenant.github_repo_name}`} size={14} />
+              </div>
+            </div>
+            <div className="border border-border rounded-lg p-4">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Globe size={14} /> Public URL
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {publicUrl ? (
+                  <>
+                    <a
+                      href={publicUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-sm text-primary-light hover:underline truncate"
+                    >
+                      {publicUrl}
+                    </a>
+                    <CopyButton text={publicUrl} size={14} />
+                  </>
+                ) : (
+                  <span className="font-mono text-sm text-muted-foreground truncate">Public URL non disponibile</span>
+                )}
+              </div>
+            </div>
+            <div className="border border-border rounded-lg p-4 sm:col-span-2">
+              <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
+                <Globe size={14} /> Deployment URL
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {deploymentUrl ? (
+                  <>
+                    <a
+                      href={deploymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-sm text-primary-light hover:underline truncate"
+                    >
+                      {deploymentUrl}
+                    </a>
+                    <CopyButton text={deploymentUrl} size={14} />
+                  </>
+                ) : (
+                  <span className="font-mono text-sm text-muted-foreground truncate">
+                    Deployment URL non disponibile
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-success-indicator" />
+            Status: {tenant.status || "active"}
+          </div>
+          <div className="pt-2 flex flex-wrap gap-2">
+            {/* HotSave Snapshot + Cold-save buttons rimossi: ADR-005 (save2repo
+                è save = commit, no Edge Config / no content store centralizzato).
+                save-stream T-108 sostituisce cold-save; nessuna controparte
+                HotSave perché non c'è hot store. */}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!tenant.admin_private_key || !publicUrl || adminAccessLoading}
+              title={
+                !tenant.admin_private_key
+                  ? "Admin keypair not configured — generate it in Settings"
+                  : !publicUrl
+                    ? "Public URL not available"
+                    : "Open tenant Studio"
+              }
+              className="gap-2"
+              onClick={async () => {
+                if (!tenant.admin_private_key || !publicUrl) return;
+                setAdminAccessLoading(true);
+                setAdminAccessError(null);
+                try {
+                  const { data: { session } } = await supabase.auth.getSession();
+                  if (!session?.access_token) throw new Error("Sessione assente o scaduta");
+                  const res = await fetch(`/api/v1/tenants/${tenant.id}/admin-token`, {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${session.access_token}`,
+                      "X-Correlation-Id": crypto.randomUUID(),
+                    },
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                  window.open(`${data.adminUrl}?token=${data.token}`, "_blank");
+                } catch (error: unknown) {
+                  setAdminAccessError(error instanceof Error ? error.message : "Errore accesso admin");
+                } finally {
+                  setAdminAccessLoading(false);
+                }
+              }}
+            >
+              {adminAccessLoading ? <Loader2 className="size-4 animate-spin" /> : <Lock size={15} />}
+              Admin
+            </Button>
+            {adminAccessError && (
+              <p className="text-xs text-destructive-foreground">{adminAccessError}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "domains" && (
+        <DomainsPanel tenantId={tenant.id} />
+      )}
+
+      {activeTab === "leads" && (
+        <LeadsPanel tenantId={tenant.id} />
+      )}
+
+      {activeTab === "agents" && (
+        <AgentsPanel tenantId={tenant.id} tenantSlug={tenant.slug} />
+      )}
+
+
+      {activeTab === "settings" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <Card className="border border-border bg-card">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Lock size={16} /> Admin Access
+              </CardTitle>
+              <CardDescription>
+                EC P-256 keypair per accedere allo Studio dal platform. La chiave privata
+                è memorizzata su Supabase e non lascia mai il server. Dopo la generazione,
+                copia la chiave pubblica come env var{" "}
+                <code className="font-mono text-xs">ADMIN_PUBLIC_KEY</code> sul progetto Vercel
+                del tenant e rideploya.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                  tenant.admin_private_key
+                    ? "border-success-border bg-success text-success-foreground"
+                    : "border-border bg-elevated text-muted-foreground"
+                }`}>
+                  {tenant.admin_private_key ? "Keypair configured" : "Not configured"}
+                </span>
+              </div>
+
+              {!tenant.admin_private_key && !generatedPublicKey && (
+                <div className="rounded-md border border-warning-border bg-warning/20 p-3 text-sm text-warning-foreground">
+                  Keypair non configurato — il bottone Admin in Overview sarà disabilitato.
+                </div>
+              )}
+
+              {generatedPublicKey && (
+                <div className="space-y-2">
+                  <div className="rounded-md border border-success-border bg-success/10 p-3 text-sm text-success-foreground">
+                    Keypair generato. Copia la public key qui sotto, incollala come{" "}
+                    <code className="font-mono text-xs">ADMIN_PUBLIC_KEY</code> su Vercel e rideploya il tenant.
+                  </div>
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      value={generatedPublicKey}
+                      rows={6}
+                      className="w-full rounded-md border border-border bg-elevated px-3 py-2 text-xs text-foreground font-mono resize-none outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard.writeText(generatedPublicKey)}
+                      className="absolute top-2 right-2 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                      title="Copia public key"
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {keypairError && (
+                <div className="rounded-md border border-destructive-border bg-destructive/20 p-3 text-sm text-destructive-foreground">
+                  {keypairError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleGenerateKeypair}
+                  disabled={generatingKeypair}
+                  className="gap-2"
+                >
+                  {generatingKeypair ? <Loader2 className="size-4 animate-spin" /> : <Lock size={15} />}
+                  {tenant.admin_private_key ? "Regenerate Keypair" : "Generate Keypair"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border border-destructive-border bg-destructive/20">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg text-destructive-foreground">Danger Zone</CardTitle>
+              <CardDescription className="text-destructive-foreground/80">
+                Elimina definitivamente il progetto, i riferimenti nel database e le immagini su storage.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border border-destructive-border bg-destructive/30 p-3 text-sm text-destructive-foreground/90">
+                Questa azione e irreversibile. Per confermare, scrivi lo slug del progetto:
+                <span className="ml-1 font-mono font-semibold">{tenant.slug}</span>
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="confirm-delete-input" className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Conferma slug progetto
+                </label>
+                <input
+                  id="confirm-delete-input"
+                  value={deleteConfirmText}
+                  onChange={(event) => setDeleteConfirmText(event.target.value)}
+                  placeholder={tenant.slug}
+                  className="w-full rounded-md border border-border bg-elevated px-3 py-2 text-sm text-foreground outline-none focus:border-destructive-ring"
+                  autoComplete="off"
+                />
+              </div>
+              {deleteError ? (
+                <div className="rounded-md border border-destructive-border bg-destructive/20 p-3 text-sm text-destructive-foreground">
+                  {deleteError}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-destructive-border text-destructive-foreground hover:bg-destructive/40 hover:text-destructive-foreground"
+                  onClick={handleDeleteProject}
+                  disabled={deleteLoading}
+                >
+                  {deleteLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {deleteLoading ? "Deleting..." : "Delete project"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {coldSaveOpen && (
+        <div className="fixed inset-0 z-50 bg-overlay/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div>
+                <h3 className="text-base font-semibold">Cold save</h3>
+                <p className="text-xs text-muted-foreground">Supabase content store → GitHub → deploy production.</p>
+              </div>
+              <button
+                type="button"
+                className="p-1 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  if (!coldSaveRunning) setColdSaveOpen(false);
+                }}
+                disabled={coldSaveRunning}
+                title="Chiudi"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {coldSaveSteps.map((step) => (
+                  <div key={step.id} className="rounded-md border border-border bg-elevated p-2 text-xs">
+                    <div className="font-medium text-foreground">{step.label}</div>
+                    <div className="text-muted-foreground mt-1">
+                      {step.status === "idle" ? "idle" : step.status === "running" ? "running..." : step.status}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-md border border-border bg-elevated p-3 h-40 overflow-auto text-xs font-mono text-muted-foreground space-y-1">
+                {coldSaveLogs.length === 0 ? <div className="text-muted-foreground">Nessun log disponibile.</div> : null}
+                {coldSaveLogs.map((log, idx) => (
+                  <div key={`${idx}-${log.slice(0, 16)}`}>{log}</div>
+                ))}
+              </div>
+
+              {coldSaveResult && !coldSaveError ? (
+                <div className="rounded-md border border-emerald-700/60 bg-emerald-900/20 p-3 text-sm text-emerald-200">
+                  Done. files={coldSaveResult.filesWritten}
+                  {coldSaveResult.commitSha ? `, commit=${coldSaveResult.commitSha.slice(0, 7)}` : ""}
+                  {coldSaveResult.deployUrl ? (
+                    <>
+                      ,{" "}
+                      <a href={coldSaveResult.deployUrl} className="underline" target="_blank" rel="noreferrer">
+                        live URL
+                      </a>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {coldSaveError ? (
+                <div className="rounded-md border border-destructive-border bg-destructive/20 p-3 text-sm text-destructive-foreground">
+                  {coldSaveError}
+                  {coldSaveCorrelationId ? <div className="mt-1 text-xs">Correlation: {coldSaveCorrelationId}</div> : null}
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {coldSaveCorrelationId ? `Correlation: ${coldSaveCorrelationId}` : "Correlation: pending"}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setColdSaveOpen(false)}
+                    disabled={coldSaveRunning}
+                  >
+                    Chiudi
+                  </Button>
+                  <Button type="button" onClick={runColdSave} disabled={coldSaveRunning}>
+                    {coldSaveRunning ? <Loader2 className="size-4 animate-spin" /> : null}
+                    {coldSaveRunning ? "Running..." : "Run again"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {snapshotOpen && (
+        <div className="fixed inset-0 z-50 bg-overlay/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div>
+                <h3 className="text-base font-semibold">HotSave Snapshot</h3>
+                <p className="text-xs text-muted-foreground">Snapshot repository JSON → Supabase content store.</p>
+              </div>
+              <button
+                type="button"
+                className="p-1 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  if (!snapshotRunning) setSnapshotOpen(false);
+                }}
+                disabled={snapshotRunning}
+                title="Chiudi"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {snapshotSteps.map((step) => (
+                  <div key={step.id} className="rounded-md border border-border bg-elevated p-2 text-xs">
+                    <div className="font-medium text-foreground">{step.label}</div>
+                    <div className="text-muted-foreground mt-1">
+                      {step.status === "idle" ? "idle" : step.status === "running" ? "running..." : step.status}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-md border border-border bg-elevated p-3 h-40 overflow-auto text-xs font-mono text-muted-foreground space-y-1">
+                {snapshotLogs.length === 0 ? <div className="text-muted-foreground">Nessun log disponibile.</div> : null}
+                {snapshotLogs.map((log, idx) => (
+                  <div key={`${idx}-${log.slice(0, 16)}`}>{log}</div>
+                ))}
+              </div>
+
+              {snapshotResult && !snapshotError ? (
+                <div className="rounded-md border border-emerald-700/60 bg-emerald-900/20 p-3 text-sm text-emerald-200">
+                  Done. entities={snapshotResult.entitiesWritten}, pages={snapshotResult.pagesWritten}, config={snapshotResult.configWritten}
+                </div>
+              ) : null}
+
+              {snapshotError ? (
+                <div className="rounded-md border border-destructive-border bg-destructive/20 p-3 text-sm text-destructive-foreground">
+                  {snapshotError}
+                  {snapshotCorrelationId ? <div className="mt-1 text-xs">Correlation: {snapshotCorrelationId}</div> : null}
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {snapshotCorrelationId ? `Correlation: ${snapshotCorrelationId}` : "Correlation: pending"}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSnapshotOpen(false)}
+                    disabled={snapshotRunning}
+                  >
+                    Chiudi
+                  </Button>
+                  <Button type="button" onClick={runHotSaveSnapshot} disabled={snapshotRunning}>
+                    {snapshotRunning ? <Loader2 className="size-4 animate-spin" /> : null}
+                    {snapshotRunning ? "Running..." : "Run again"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-// Lint: keep these imports referenced so future tabs can be wired without re-importing.
-void Trash2;
