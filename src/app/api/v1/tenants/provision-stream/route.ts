@@ -115,6 +115,11 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     new URL(req.url).origin;
 
+  // Per-tenant public form key (T-114): random 32-hex secret embedded in the
+  // tenant Vite app via VITE_FORM_KEY env, used to authenticate inbound POSTs
+  // to /api/v1/forms/submit. Stored in tenants.public_form_key.
+  const publicFormKey = `${crypto.randomUUID().replace(/-/g, "")}${crypto.randomUUID().replace(/-/g, "")}`;
+
   // ----- 3. Open SSE stream + run provisioning ------------------------------
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -138,6 +143,7 @@ export async function POST(req: NextRequest) {
           slug,
           name,
           cloudUrl,
+          publicFormKey,
           emit,
         });
       } catch (err) {
@@ -170,9 +176,10 @@ async function runProvisioning(params: {
   slug: string;
   name: string;
   cloudUrl: string;
+  publicFormKey: string;
   emit: (event: EmitEvent) => void;
 }): Promise<void> {
-  const { userId, templateOwner, templateRepo, slug, name, cloudUrl, emit } = params;
+  const { userId, templateOwner, templateRepo, slug, name, cloudUrl, publicFormKey, emit } = params;
   const supabase = getSupabaseAdmin();
 
   // ----- Fetch owner_integrations -----
@@ -298,6 +305,15 @@ async function runProvisioning(params: {
             type: "plain",
             target: ["production", "preview", "development"],
           },
+          {
+            // T-114: per-tenant public form key embedded in the Vite app
+            // so the tenant site can POST /api/v1/forms/submit with the
+            // bearer + receive leads in the owner's Leads tab.
+            key: "VITE_FORM_KEY",
+            value: publicFormKey,
+            type: "encrypted",
+            target: ["production", "preview", "development"],
+          },
           // VITE_JSONPAGES_API_KEY is deferred to T-110 once MCP credentials
           // are assigned for this tenant.
         ]),
@@ -411,6 +427,7 @@ async function runProvisioning(params: {
         vercel_project_id: vercelProjectId,
         vercel_url: deployUrl,
         vercel_public_url: `https://${slug}.vercel.app`,
+        public_form_key: publicFormKey,
       })
       .select("id")
       .single<{ id: string }>();
