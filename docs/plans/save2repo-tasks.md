@@ -50,8 +50,8 @@ Convenzione:
 - `src/app/api/v1/tenants/[id]/domains/[domain]/cf-bootstrap/**`
 - `src/app/api/v1/tenants/[id]/domains/[domain]/cf-disconnect/**`
 - `src/app/api/v1/tenants/[id]/domains/[domain]/dns/**`
-- `src/app/api/v1/tenants/[id]/leads/**` (out of day-1 scope)
-- `src/app/api/v1/forms/submit/**` (out of day-1 scope)
+- `src/app/api/v1/tenants/[id]/leads/**` (out of day-1 scope) — **rescoped IN day-1 (2026-05-25), restore in [T-114](#t-114-restore-leads-backend--single-owner-adapter-rescoped-in)**
+- `src/app/api/v1/forms/submit/**` (out of day-1 scope) — **rescoped IN day-1 (2026-05-25), restore in [T-114](#t-114-restore-leads-backend--single-owner-adapter-rescoped-in)**
 - `src/app/api/v1/tenants/previews/**` (out of day-1 scope)
 
 **Acceptance:**
@@ -62,6 +62,7 @@ Convenzione:
 **Dependencies:** T-001
 **Files:** ~15 cartelle rimosse
 **Scope:** M
+**Revision 2026-05-25:** dopo la prima E2E utente (deploy `nerosave`), il decision-maker ha rescoped Leads + Forms submit dentro day-1 (i tenant siti hanno bisogno di un endpoint per form pubblici fin dal launch). Le rimozioni sopra restano in vigore per la Phase 0 cleanup (semplifica T-006 + tsc verde); il restore avviene in [T-114](#t-114-restore-leads-backend--single-owner-adapter-rescoped-in) con adapter single-owner + colonne schema save2repo, non un revert puro del codice parent.
 
 ### T-004: Rimozione lib out-of-scope
 **Description:** cancella lib che ADR-005/008 marcano come rimosse:
@@ -79,7 +80,9 @@ Convenzione:
 - `src/lib/formsEmailTemplates.ts`
 - `src/lib/tenantPreview.ts` (out of day-1 scope)
 - `src/lib/tenantStaticFiles.ts` (out of day-1 scope — assets upload)
-- `src/lib/tenantSubmissionSchema.ts`, `tenantSubmissionValidator.ts` (era per forms)
+- `src/lib/tenantSubmissionSchema.ts`, `tenantSubmissionValidator.ts` (era per forms) — **rescoped IN insieme a forms/submit, restore in [T-114](#t-114-restore-leads-backend--single-owner-adapter-rescoped-in)**
+
+(Revision 2026-05-25: `formsResend.ts`, `formsTelemetry.ts`, `formsEmailTemplates.ts`, `tenantSubmissionSchema.ts`, `tenantSubmissionValidator.ts` rescoped IN day-1 — restore in T-114. Le rimozioni in questo task restano in vigore; T-114 ricrea con adapter single-owner.)
 
 Rimuovi anche script orfani in `scripts/` (`domain-status-sot-test.mjs`, `custom-domains-enterprise-test.mjs`, `cf-domains-test.mjs`, `forms-resend-suite.mjs`, `domains-ui-suite.mjs`).
 
@@ -494,7 +497,7 @@ Error UX: se endpoint down → error chiaro "olonjs backend unreachable, try aga
 **Scope:** M
 
 ### T-110: MCP gateway per tenant
-**Description:** `mcpGatewayHandler.ts` preservato as-is. Route `/api/v1/mcp/t/[tenant]/route.ts` adattata (auth single-owner). OAuth flow `/authorize` + `/token` preservato. Tool `save` riadattato a save2repo-only (chiama T-108 path). `tenant_agent_credentials` table preservata. UI in dashboard `/settings/agents` per creare credenziali.
+**Description:** `mcpGatewayHandler.ts` preservato as-is. Route `/api/v1/mcp/t/[tenant]/route.ts` adattata (auth single-owner). OAuth flow `/authorize` + `/token` preservato. Tool `save` riadattato a save2repo-only (chiama T-108 path). `tenant_agent_credentials` table preservata. UI = `AgentsPanel` renderizzata dentro il tab **Agents** del tenant detail page (`/dashboard/[id]?tab=agents`, per-tenant scope come parent — NON `/settings/agents` che era globale). Sblocca riempimento Agents tab in [T-113](#t-113-tenant-detail-shell-rewrite-idpagetsx-single-owner).
 **Acceptance:**
 - [ ] MCP discovery endpoints rispondono per ogni tenant
 - [ ] OAuth Code+PKCE flow completo funziona
@@ -525,6 +528,106 @@ Error UX: se endpoint down → error chiaro "olonjs backend unreachable, try aga
 - [ ] manual E2E: provoca un build error sul tenant, verifica log visibili
 **Dependencies:** T-106
 **Files:** `src/app/api/v1/tenants/[id]/logs/route.ts`, `src/app/dashboard/[id]/logs/page.tsx`
+**Scope:** S
+
+### T-113: Tenant detail shell rewrite (`[id]/page.tsx` single-owner)
+**Description:** rewrite `src/app/dashboard/[id]/page.tsx` (oggi 1158 righe parent, ignorato dal plan originale — gap riconosciuto dopo il primo E2E utente, vedi [T-006.b](#t-006b-db-ui-types-alignment-gap-del-plan-scoperto-durante-t-105-smoke)). Stessa medicina di T-105 sul dashboard list:
+
+**Shell layout (5 tab dopo cleanup):**
+- **Overview** — status badge, slug, link `github_owner_login/github_repo_name`, link `vercel_public_url`/`vercel_url`, created_at, copy buttons, Delete tenant. **Rimossi** i bottoni HotSave / Snapshot / Cold-save (ADR-005), preview-bootstrap loop, tutti i fetch a `/api/v1/tenants/[id]/save2edge-snapshot` / `/cold-save` / `/api/v1/content`.
+- **Domains** — renderizza `DomainsPanel` esistente (backend pronto per T-109).
+- **Leads** — renderizza `LeadsPanel` esistente; tab attiva quando [T-114](#t-114-restore-leads-backend--single-owner-adapter-rescoped-in) landa; placeholder informativo finché lì.
+- **Agents** — renderizza `AgentsPanel` esistente; attiva quando [T-110](#t-110-mcp-gateway-per-tenant) landa; placeholder finché lì.
+- **Settings** — placeholder finché [T-116](#t-116-settings-tab-content) landa.
+
+**Strip eliminato (ADR-003 + decision 2026-05-25):**
+- Tab Billing intero (componente + tab routing)
+- Tab Snapshot / Cold-save / HotSave dell'Overview
+- `EntitlementsToast` (già cancellato in `29bc4fe`, ma confermo)
+- Riferimenti a `/api/v1/licensing/*`, `/api/v1/forms/submit` (ritorna live in T-114 ma il flow user-facing è da Leads tab, non dal Settings tenant)
+
+**Acceptance:**
+- [ ] click su tab Domains → render senza crash (DomainsPanel)
+- [ ] click su tab Leads → placeholder o LeadsPanel se T-114 done
+- [ ] click su tab Agents → placeholder o AgentsPanel se T-110 done
+- [ ] click su tab Settings → placeholder o panel se T-116 done
+- [ ] tab Billing NON esiste (rimosso dal layout)
+- [ ] Overview NON ha bottoni HotSave/Snapshot/Cold-save
+- [ ] Overview fetch usa esclusivamente colonne schema save2repo
+- [ ] tsc verde, no fetch a route rimosse
+
+**Verification:**
+- [ ] click su tenant `nerosave` esistente → Overview render senza "Progetto non trovato"
+- [ ] navigazione tra tab senza 404 in network
+- [ ] grep nel file finale: 0 ref a `licensing`, `leads`, `snapshot`, `cold-save`, `forms/submit`, `content_store`
+
+**Dependencies:** T-005, T-006, T-006.b (drift colonne), T-109 (Domains backend)
+**Files:** `src/app/dashboard/[id]/page.tsx` (rewrite); eventuale delete `src/app/dashboard/components/billing/*` se esiste; placeholder file per tab non ancora attivi
+**Scope:** M (~300 righe new, ~1100 deleted)
+
+### T-114: Restore Leads backend + single-owner adapter (rescoped IN)
+**Description:** ricreare il backend Leads + Forms che [T-003](#t-003-rimozione-api-routes-out-of-scope) aveva cancellato come "out of day-1 scope" + [T-004](#t-004-rimozione-lib-out-of-scope) aveva tolto le lib relative. **Rescope 2026-05-25:** sono day-1 perché i tenant siti hanno bisogno dell'endpoint `/api/v1/forms/submit` per ricevere form data + il proprietario vede i leads nella dashboard tenant tab Leads. NON è un revert puro: porting da parent + adapter single-owner (`assertOwner` invece di `assertTenantAccess`, colonne save2repo).
+
+**Backend da reintrodurre:**
+- Routes: `/api/v1/tenants/[id]/leads/route.ts` (GET list + POST create), `/api/v1/tenants/[id]/leads/[leadId]/route.ts` (GET / DELETE), `/api/v1/forms/submit/route.ts` (PUBLIC endpoint per i siti tenant — auth via tenant slug + idempotency key, no bearer)
+- Libs (porting da parent + adapt): `src/lib/formsResend.ts`, `formsTelemetry.ts`, `formsEmailTemplates.tsx`, `tenantSubmissionSchema.ts`, `tenantSubmissionValidator.ts`
+- Migration: nuova `supabase/migrations/<timestamp>_tenant_leads.sql` con tabella `tenant_leads` (id, tenant_id FK, payload jsonb, source, ip, user_agent, created_at) + eventuale `tenant_lead_events` per timeline; RLS owner-only via `auth.uid()` matching parent owner
+
+**Env vars (nuove):** `RESEND_API_KEY`, `RESEND_FROM_EMAIL` — documentare in `.env.example` + setup wizard T-102
+
+**UI (esiste già — solo adapt):** `src/app/dashboard/components/leads/LeadsPanel.tsx` + sotto-componenti (`useLeads`, `LeadsTable`, `LeadStatusBadge`, `LeadErrorBanner`, `api.ts`, `types.ts`). Patch dei nomi colonna + auth pattern se drift residuo.
+
+**Acceptance:**
+- [ ] POST pubblico `/api/v1/forms/submit` con body `{tenant_slug, payload}` → 201 + INSERT in `tenant_leads`
+- [ ] GET `/api/v1/tenants/[id]/leads` autenticato single-owner → lista leads del tenant
+- [ ] DELETE `/api/v1/tenants/[id]/leads/[leadId]` → soft delete
+- [ ] Email notifica al proprietario inviata via Resend al submit (se `RESEND_API_KEY` configurato)
+- [ ] LeadsPanel renderizza nel tab Leads di T-113 senza crash
+- [ ] tsc verde
+
+**Verification:**
+- [ ] curl al `/api/v1/forms/submit` con tenant fittizio → insert visibile in `tenant_leads`
+- [ ] LeadsPanel mostra il lead inserito
+- [ ] Resend log conferma email inviata (se configurato)
+
+**Dependencies:** T-005 (baseline schema), T-006 (assertOwner), T-113 (shell con tab Leads)
+**Files:** ~5 lib + 3 route + 1 migration + adapter LeadsPanel
+**Scope:** M
+
+### T-115: API tab content
+**Description:** nuovo content per il tab API del tenant detail page (T-113). Mostra:
+- Endpoint URLs di questo tenant (MCP, A2A, webMCP, save2repo cold-save, custom domain primary)
+- Copy buttons per ogni URL
+- Snippet curl pronti per copia: `curl <mcp-endpoint>`, esempio MCP client config (Claude Desktop), esempio Cursor MCP, esempio fetch JS per form submit pubblico
+- Link alla doc OAuth flow (`/authorize` + `/token`) per i tool che si autenticano col PKCE
+
+Non introduce nuove route — sintesi UI di endpoint esistenti.
+
+**Acceptance:**
+- [ ] click su tab API → renderizza pannello con tutti gli endpoint del tenant
+- [ ] copy buttons funzionanti
+- [ ] snippet aggiornati ai path effettivi (`/api/v1/mcp/t/[slug]`, `/api/v1/a2a/t/[slug]`, ecc.)
+**Verification:**
+- [ ] manual E2E: paste snippet in Claude Desktop config → connessione MCP riuscita (richiede T-110 verde)
+**Dependencies:** T-110 (MCP route live), T-111 (A2A route live), T-113 (shell)
+**Files:** `src/app/dashboard/components/api/ApiPanel.tsx` (nuovo), update `[id]/page.tsx` per renderizzarlo nel tab
+**Scope:** S
+
+### T-116: Settings tab content
+**Description:** nuovo content per il tab Settings del tenant detail. Operations single-owner:
+- Rename slug (con redeploy Vercel se necessario — TBD se cambio slug forza rebuild)
+- Rotate admin keypair (ADR-002: `admin_private_key` pgsodium-encrypted nel DB; trigger regenerazione + reinject `ADMIN_PUBLIC_KEY` nelle env Vercel del tenant)
+- Delete tenant (chiama DELETE `/api/v1/tenants/[id]` esistente — preservato dal parent)
+- Eventuale: override env vars del tenant project Vercel (manual key/value list with Vercel env API)
+
+**Acceptance:**
+- [ ] rename slug → row `tenants` aggiornata, Vercel project rinominato (best-effort), redirect dashboard al nuovo slug
+- [ ] rotate admin key → DB ruotato + Vercel env aggiornata + commit verifica deploy READY
+- [ ] delete tenant → conferma modal + DELETE chiamato + redirect dashboard list
+**Verification:**
+- [ ] manual E2E per ogni azione
+**Dependencies:** T-005 (admin_private_key column), T-006 (assertOwner), T-113 (shell)
+**Files:** `src/app/dashboard/components/settings/SettingsPanel.tsx` (nuovo), eventuali route helper (es. `/api/v1/tenants/[id]/admin-keypair/rotate` se non già preservata)
 **Scope:** S
 
 ### Checkpoint Phase 1
@@ -739,14 +842,22 @@ Riferimento [vercel/example-marketplace-integration](https://github.com/vercel/e
 
 | Phase | XS | S | M | Total |
 |---|---|---|---|---|
-| Phase 0 | 1 | 2 | 5 | 8 |
+| Phase 0 | 1 | 3 | 5 | 9 |
 | Phase A | 0 | 3 | 3 | 6 |
-| Phase 1 | 0 | 4 | 8 | 12 |
+| Phase 1 | 0 | 6 | 10 | 16 |
 | Phase 2 | 0 | 2 | 5 | 7 |
 | Phase 3 | 1 | 2 | 2 | 5 |
-| **TOT** | **2** | **13** | **23** | **38** |
+| **TOT** | **2** | **16** | **25** | **43** |
 
-(Conteggio 38 incluso checkpoint formali; task effettivi 34. T-102.b cancellato — assorbito in T-202. T-103 ridotto da M a S — happy path auto-popolato via T-A06. T-A05 allargato da XS a S — copre 2 OAuth App, GitHub + Supabase, per ADR-011.)
+(Conteggio 43 incluso checkpoint formali; task effettivi 39. Cambi rispetto al baseline 31 task:
+- T-102.b cancellato — assorbito in T-202
+- T-103 ridotto da M a S — happy path auto-popolato via T-A06
+- T-A05 allargato da XS a S — copre 2 OAuth App, GitHub + Supabase, per ADR-011
+- T-006.b aggiunto (S, done) — DB-UI types alignment scoperto durante T-105 smoke
+- **T-113 aggiunto (M)** — Tenant detail shell rewrite (gap del plan dopo Phase 0 cleanup)
+- **T-114 aggiunto (M, rescoped IN)** — Restore Leads backend + adapter single-owner
+- **T-115 aggiunto (S)** — API tab content
+- **T-116 aggiunto (S)** — Settings tab content)
 
 ## Verification pre-implementation (skill checklist)
 - [x] Ogni task ha acceptance criteria
