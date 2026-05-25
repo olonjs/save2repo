@@ -20,6 +20,7 @@ import {
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { DomainsPanel } from "@/app/dashboard/components/domains/DomainsPanel";
+import { LeadsPanel } from "@/app/dashboard/components/leads/LeadsPanel";
 import type { TenantRow } from "@/types/database";
 
 // ----------------------------------------------------------------------------
@@ -53,7 +54,7 @@ type Tab = "overview" | "domains" | "leads" | "agents" | "settings";
 const TABS: { id: Tab; label: string; icon: React.ComponentType<{ size?: number }>; ready: boolean; placeholder?: string }[] = [
   { id: "overview", label: "Overview", icon: Globe, ready: true },
   { id: "domains", label: "Domains", icon: Globe, ready: true },
-  { id: "leads", label: "Leads", icon: AlertCircle, ready: false, placeholder: "Leads tab lands with T-114 (backend restore in progress)." },
+  { id: "leads", label: "Leads", icon: AlertCircle, ready: true },
   { id: "agents", label: "Agents", icon: Plug, ready: false, placeholder: "Agents tab lands with T-110 (MCP gateway)." },
   { id: "settings", label: "Settings", icon: KeyRound, ready: false, placeholder: "Settings tab lands with T-116 (rename / rotate keypair / delete)." },
 ];
@@ -142,6 +143,8 @@ export default function TenantDetailPage() {
           <OverviewTab tenant={tenant} />
         ) : activeTab === "domains" ? (
           <DomainsPanel tenantId={tenant.id} />
+        ) : activeTab === "leads" ? (
+          <LeadsPanel tenantId={tenant.id} />
         ) : (
           <PlaceholderTab tab={activeTab} />
         )}
