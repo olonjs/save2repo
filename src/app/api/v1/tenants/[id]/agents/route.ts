@@ -4,6 +4,7 @@ import {
   createTenantAgentCredential,
   listTenantAgentCredentials,
   normalizeScopes,
+  serializeCredentialForApi,
   type AgentCredentialScope,
 } from "@/lib/mcpGatewayCredentials";
 import { resolveCorrelationId } from "@/lib/correlation";
@@ -14,34 +15,6 @@ type CreateCredentialBody = {
   label?: string;
   scopes?: AgentCredentialScope[];
 };
-
-function serializeCredential(row: {
-  id: string;
-  tenant_id: string;
-  client_id: string;
-  label: string;
-  scopes: AgentCredentialScope[];
-  secret_hint: string;
-  created_by: string | null;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  created_at: string;
-  updated_at: string;
-}) {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    clientId: row.client_id,
-    label: row.label,
-    scopes: row.scopes,
-    secretHint: row.secret_hint,
-    createdBy: row.created_by,
-    lastUsedAt: row.last_used_at,
-    revokedAt: row.revoked_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
 
 async function ensureAccess(req: NextRequest, tenantId: string, correlationId: string) {
   const auth = await requireRequestUser(req);
@@ -75,21 +48,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     return NextResponse.json({
       correlationId,
       tenantId: params.id,
-      credentials: credentials.map((credential) =>
-        serializeCredential({
-          id: credential.id,
-          tenant_id: credential.tenant_id,
-          client_id: credential.client_id,
-          label: credential.label,
-          scopes: credential.scopes,
-          secret_hint: credential.secret_hint,
-          created_by: credential.created_by,
-          last_used_at: credential.last_used_at,
-          revoked_at: credential.revoked_at,
-          created_at: credential.created_at,
-          updated_at: credential.updated_at,
-        })
-      ),
+      credentials: credentials.map(serializeCredentialForApi),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list agent credentials";
@@ -112,25 +71,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       tenantId: params.id,
       label,
       scopes,
-      createdBy: access.userId,
     });
     return NextResponse.json(
       {
         correlationId,
         tenantId: params.id,
-        credential: serializeCredential({
-          id: created.row.id,
-          tenant_id: created.row.tenant_id,
-          client_id: created.row.client_id,
-          label: created.row.label,
-          scopes: created.row.scopes,
-          secret_hint: created.row.secret_hint,
-          created_by: created.row.created_by,
-          last_used_at: created.row.last_used_at,
-          revoked_at: created.row.revoked_at,
-          created_at: created.row.created_at,
-          updated_at: created.row.updated_at,
-        }),
+        credential: serializeCredentialForApi(created.row),
         clientId: created.clientId,
         clientSecret: created.clientSecret,
         secret: created.clientSecret,

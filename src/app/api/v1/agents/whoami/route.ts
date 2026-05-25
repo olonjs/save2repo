@@ -126,7 +126,7 @@ async function handle(req: NextRequest): Promise<NextResponse> {
       credential: {
         id: credential.id,
         clientId: credential.client_id,
-        label: credential.label,
+        label: credential.display_name,
         scopes: credential.scopes,
         tenantId: credential.tenant_id,
         revokedAt: credential.revoked_at,

@@ -1,21 +1,32 @@
 import { createHash, randomBytes } from "crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import type { TenantAgentCredentialRow as DbTenantAgentCredentialRow } from "@/types/database";
+
+// ----------------------------------------------------------------------------
+// MCP gateway credentials (T-006.b alignment).
+//
+// DB is the SOT: save2repo schema for `tenant_agent_credentials` is leaner
+// than the parent jsonpages-platform variant. Specifically:
+//
+//   parent column  → save2repo column / fate
+//   ──────────────────────────────────────────────────────────────
+//   label          → display_name
+//   secret_hash    → client_secret_hash
+//   secret_hint    → DROPPED (single-owner, fingerprint not needed)
+//   created_by     → DROPPED (single-owner = one possible creator)
+//   updated_at     → DROPPED (created_at is enough for this table)
+//
+// The internal lib type mirrors the DB; the API/UI layer (agents/route.ts +
+// AgentsPanel) keeps the parent-friendly `label` and adds a synthetic
+// `secret_hint` derived from client_id so the AgentsPanel renders without
+// modification.
+// ----------------------------------------------------------------------------
 
 export type AgentCredentialScope = "read" | "write" | "submit-form";
 
-export type TenantAgentCredentialRow = {
-  id: string;
-  tenant_id: string;
-  client_id: string;
-  label: string;
+/** Internal row shape — matches the DB SOT 1:1. */
+export type TenantAgentCredentialRow = DbTenantAgentCredentialRow & {
   scopes: AgentCredentialScope[];
-  secret_hash: string;
-  secret_hint: string;
-  created_by: string | null;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
 const ALLOWED_SCOPES: AgentCredentialScope[] = ["read", "write", "submit-form"];
@@ -45,19 +56,16 @@ export function generateAgentClientId(): string {
   return `olon_client_${randomBytes(10).toString("hex")}`;
 }
 
-function buildSecretHint(secret: string): string {
-  return `...${secret.slice(-6)}`;
-}
+const SELECT_COLUMNS =
+  "id,tenant_id,client_id,display_name,scopes,client_secret_hash,last_used_at,revoked_at,created_at";
 
 export async function createTenantAgentCredential(params: {
   tenantId: string;
   label: string;
   scopes: AgentCredentialScope[];
-  createdBy: string;
 }): Promise<{ row: TenantAgentCredentialRow; clientId: string; clientSecret: string }> {
   const secret = generateAgentSecret();
   const secretHash = hashAgentSecret(secret);
-  const secretHint = buildSecretHint(secret);
   const clientId = generateAgentClientId();
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
@@ -65,13 +73,11 @@ export async function createTenantAgentCredential(params: {
     .insert({
       tenant_id: params.tenantId,
       client_id: clientId,
-      label: params.label,
+      display_name: params.label,
       scopes: params.scopes,
-      secret_hash: secretHash,
-      secret_hint: secretHint,
-      created_by: params.createdBy,
+      client_secret_hash: secretHash,
     })
-    .select("id,tenant_id,client_id,label,scopes,secret_hash,secret_hint,created_by,last_used_at,revoked_at,created_at,updated_at")
+    .select(SELECT_COLUMNS)
     .single<TenantAgentCredentialRow>();
 
   if (error || !data) {
@@ -84,7 +90,7 @@ export async function listTenantAgentCredentials(tenantId: string): Promise<Tena
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("tenant_agent_credentials")
-    .select("id,tenant_id,client_id,label,scopes,secret_hash,secret_hint,created_by,last_used_at,revoked_at,created_at,updated_at")
+    .select(SELECT_COLUMNS)
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false })
     .returns<TenantAgentCredentialRow[]>();
@@ -100,14 +106,11 @@ export async function revokeTenantAgentCredential(params: {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from("tenant_agent_credentials")
-    .update({
-      revoked_at: nowIso,
-      updated_at: nowIso,
-    })
+    .update({ revoked_at: nowIso })
     .eq("tenant_id", params.tenantId)
     .eq("id", params.credentialId)
     .is("revoked_at", null)
-    .select("id,tenant_id,client_id,label,scopes,secret_hash,secret_hint,created_by,last_used_at,revoked_at,created_at,updated_at")
+    .select(SELECT_COLUMNS)
     .maybeSingle<TenantAgentCredentialRow>();
   if (error) throw new Error(`Failed to revoke agent credential: ${error.message}`);
   return data ?? null;
@@ -118,8 +121,8 @@ export async function resolveAgentCredentialBySecret(secret: string): Promise<Te
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("tenant_agent_credentials")
-    .select("id,tenant_id,client_id,label,scopes,secret_hash,secret_hint,created_by,last_used_at,revoked_at,created_at,updated_at")
-    .eq("secret_hash", secretHash)
+    .select(SELECT_COLUMNS)
+    .eq("client_secret_hash", secretHash)
     .is("revoked_at", null)
     .maybeSingle<TenantAgentCredentialRow>();
   if (error) throw new Error(`Failed to resolve agent credential: ${error.message}`);
@@ -130,7 +133,7 @@ export async function resolveAgentCredentialByClientId(clientId: string): Promis
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("tenant_agent_credentials")
-    .select("id,tenant_id,client_id,label,scopes,secret_hash,secret_hint,created_by,last_used_at,revoked_at,created_at,updated_at")
+    .select(SELECT_COLUMNS)
     .eq("client_id", clientId)
     .is("revoked_at", null)
     .maybeSingle<TenantAgentCredentialRow>();
@@ -139,7 +142,7 @@ export async function resolveAgentCredentialByClientId(clientId: string): Promis
 }
 
 export function verifyClientSecret(credential: TenantAgentCredentialRow, clientSecret: string): boolean {
-  return credential.secret_hash === hashAgentSecret(clientSecret);
+  return credential.client_secret_hash === hashAgentSecret(clientSecret);
 }
 
 export async function touchAgentCredentialUsage(credentialId: string): Promise<void> {
@@ -147,7 +150,29 @@ export async function touchAgentCredentialUsage(credentialId: string): Promise<v
   const nowIso = new Date().toISOString();
   const { error } = await supabaseAdmin
     .from("tenant_agent_credentials")
-    .update({ last_used_at: nowIso, updated_at: nowIso })
+    .update({ last_used_at: nowIso })
     .eq("id", credentialId);
   if (error) throw new Error(`Failed to update agent credential usage: ${error.message}`);
+}
+
+/**
+ * UI-facing serializer: maps the DB row to the API contract the AgentsPanel
+ * expects (parent-style `label` + synthetic `secret_hint` derived from
+ * client_id since save2repo no longer stores the secret hint column).
+ */
+export function serializeCredentialForApi(row: TenantAgentCredentialRow) {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    clientId: row.client_id,
+    label: row.display_name ?? "",
+    scopes: row.scopes,
+    // Synthetic hint: last 6 chars of client_id (the secret itself is never
+    // re-readable after creation; the hint here is purely a row-identifying
+    // fingerprint visible in the AgentsPanel table).
+    secretHint: `…${row.client_id.slice(-6)}`,
+    lastUsedAt: row.last_used_at,
+    revokedAt: row.revoked_at,
+    createdAt: row.created_at,
+  };
 }

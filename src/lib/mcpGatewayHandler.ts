@@ -195,7 +195,7 @@ export async function handleMcpJsonRpc(params: {
                   tenantId: context.tenant.id,
                   tenantSlug: context.tenant.slug,
                   credentialId: context.credential.id,
-                  credentialLabel: context.credential.label,
+                  credentialLabel: context.credential.display_name,
                   clientId: context.credential.client_id,
                   scopes: context.credential.scopes,
                   authMode: context.authMode,
@@ -249,7 +249,7 @@ export async function handleMcpJsonRpc(params: {
       const sha = typeof args.sha === "string" ? args.sha : undefined;
       const message = (typeof args.message === "string" && args.message.trim())
         ? args.message.trim()
-        : `Update ${path} via MCP (credential ${context.credential.label})`;
+        : `Update ${path} via MCP (credential ${context.credential.display_name})`;
       if (content === null) {
         return NextResponse.json(err(id, -32602, "Missing arguments.content (string)"), { status: 400, headers: mcpCorsHeaders });
       }
@@ -338,7 +338,7 @@ export async function handleMcpJsonRpc(params: {
         const newContent = JSON.stringify({ ...page, sections }, null, 2);
         const written = await writeContent(repoCtx.installationId, repoCtx.owner, repoCtx.repo, filePath, {
           content: newContent,
-          message: `Update section ${sectionId} on ${slug} via MCP (credential ${context.credential.label})`,
+          message: `Update section ${sectionId} on ${slug} via MCP (credential ${context.credential.display_name})`,
           sha: current.sha,
         });
         return NextResponse.json(

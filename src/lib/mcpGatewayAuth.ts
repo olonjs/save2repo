@@ -111,7 +111,7 @@ export async function resolveMcpGatewayTenantContext(headers: Headers): Promise<
   console.info("[mcp-gateway-auth] resolved", {
     authMode,
     credentialId: credential.id,
-    credentialLabel: credential.label,
+    credentialLabel: credential.display_name,
     clientId: credential.client_id,
     tenantId: tenant.id,
     tenantSlug: tenant.slug,
