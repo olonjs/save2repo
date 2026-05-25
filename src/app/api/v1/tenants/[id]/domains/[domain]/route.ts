@@ -51,7 +51,8 @@ export async function GET(
   const { data: row } = await supabaseAdmin
     .from('tenant_domains')
     .select(
-      'id, domain, status, verification_targets, last_error_code, last_error_message, verified_at, created_at, updated_at, cf_zone_id, cf_nameservers, cf_status, cf_attached_at, cf_last_error_code, cf_last_error_message'
+      // save2repo excludes Cloudflare automation per ADR-008.
+      'id, domain, status, verification_targets, last_error_code, last_error_message, verified_at, created_at, updated_at'
     )
     .eq('tenant_id', params.id)
     .eq('domain', domain)

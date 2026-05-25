@@ -70,8 +70,9 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from('tenant_domains')
+    // save2repo excludes Cloudflare automation per ADR-008 — drop cf_* from SELECT.
     .select(
-      'id, domain, status, verification_method, verification_targets, created_at, updated_at, verified_at, last_error_code, last_error_message, cf_zone_id, cf_nameservers, cf_status, cf_attached_at, cf_last_error_code, cf_last_error_message'
+      'id, domain, status, verification_method, verification_targets, created_at, updated_at, verified_at, last_error_code, last_error_message'
     )
     .eq('tenant_id', params.id)
     .is('deleted_at', null)
