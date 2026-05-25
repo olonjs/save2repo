@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasScope, type McpGatewayTenantContext } from "@/lib/mcpGatewayAuth";
+import { getSupabaseAdmin } from "@/lib/supabase";
+import {
+  readContent,
+  writeContent,
+  ContentNotFoundError,
+  ContentApiError,
+} from "@/lib/githubContent";
+import { GithubInstallationTokenError } from "@/lib/githubAppClient";
 
 // ============================================================================
 // save2repo MCP gateway handler — Phase 0 stub.
@@ -203,9 +211,97 @@ export async function handleMcpJsonRpc(params: {
       );
     }
 
-    // All other tools are advertised in tools/list (so MCP clients can see what
-    // is coming) but not yet wired. T-110 reimplements them.
-    if (["read-content", "cold-save", "navigate-to-page", "update-section"].includes(toolName)) {
+    // T-110 slice 2: real tool implementations via githubContent + githubAppClient.
+    if (toolName === "read-content") {
+      if (!hasScope(context.credential.scopes, "read")) {
+        return NextResponse.json(err(id, -32003, "Forbidden: missing read scope"), { status: 403, headers: mcpCorsHeaders });
+      }
+      const path = typeof body.params?.arguments === "object" && body.params?.arguments
+        ? (((body.params.arguments as Record<string, unknown>).slug ?? (body.params.arguments as Record<string, unknown>).path) as string | undefined)
+        : undefined;
+      const filePath = (typeof path === "string" && path.trim()) ? path.trim() : "jsp.json";
+      const repoCtx = await resolveTenantRepoContext(context.tenant.id);
+      if (!repoCtx.ok) {
+        return NextResponse.json(err(id, -32000, repoCtx.error, { code: repoCtx.code, correlationId }), { status: 409, headers: mcpCorsHeaders });
+      }
+      try {
+        const result = await readContent(repoCtx.installationId, repoCtx.owner, repoCtx.repo, filePath);
+        return NextResponse.json(
+          ok(id, {
+            content: [
+              { type: "text", text: JSON.stringify({ path: filePath, content: result.content, sha: result.sha, correlationId }, null, 2) },
+            ],
+          }),
+          { headers: mcpCorsHeaders }
+        );
+      } catch (toolErr) {
+        return mcpToolError(id, toolErr, correlationId);
+      }
+    }
+
+    if (toolName === "cold-save") {
+      if (!hasScope(context.credential.scopes, "write")) {
+        return NextResponse.json(err(id, -32003, "Forbidden: missing write scope"), { status: 403, headers: mcpCorsHeaders });
+      }
+      const args = (body.params?.arguments as Record<string, unknown> | undefined) ?? {};
+      const path = (typeof args.path === "string" && args.path.trim()) ? args.path.trim() : "jsp.json";
+      const content = typeof args.content === "string" ? args.content : null;
+      const sha = typeof args.sha === "string" ? args.sha : undefined;
+      const message = (typeof args.message === "string" && args.message.trim())
+        ? args.message.trim()
+        : `Update ${path} via MCP (credential ${context.credential.label})`;
+      if (content === null) {
+        return NextResponse.json(err(id, -32602, "Missing arguments.content (string)"), { status: 400, headers: mcpCorsHeaders });
+      }
+      const repoCtx = await resolveTenantRepoContext(context.tenant.id);
+      if (!repoCtx.ok) {
+        return NextResponse.json(err(id, -32000, repoCtx.error, { code: repoCtx.code, correlationId }), { status: 409, headers: mcpCorsHeaders });
+      }
+      try {
+        const result = await writeContent(repoCtx.installationId, repoCtx.owner, repoCtx.repo, path, { content, message, sha });
+        return NextResponse.json(
+          ok(id, {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  path,
+                  sha: result.sha,
+                  note: "Commit pushed; Vercel will rebuild automatically (~30-90s).",
+                  correlationId,
+                }, null, 2),
+              },
+            ],
+          }),
+          { headers: mcpCorsHeaders }
+        );
+      } catch (toolErr) {
+        return mcpToolError(id, toolErr, correlationId);
+      }
+    }
+
+    // navigate-to-page is stateless — MCP context has no per-session state.
+    if (toolName === "navigate-to-page") {
+      const slug = typeof body.params?.arguments === "object" && body.params?.arguments
+        ? ((body.params.arguments as Record<string, unknown>).slug as string | undefined)
+        : undefined;
+      return NextResponse.json(
+        ok(id, {
+          content: [
+            {
+              type: "text",
+              text: `Acknowledged. Use read-content with slug='${slug ?? "home"}' to fetch the page.`,
+            },
+          ],
+        }),
+        { headers: mcpCorsHeaders }
+      );
+    }
+
+    // update-section: minor mutation helper. Phase 0 stub until T-110 slice 3
+    // adds the structured page schema parser. Agents can already round-trip
+    // via read-content → mutate JSON client-side → cold-save.
+    if (toolName === "update-section") {
       return notImplemented(id, toolName, correlationId);
     }
 
@@ -224,3 +320,53 @@ export async function handleMcpJsonRpc(params: {
 // Silence unused-imports of NextRequest in production builds where the route
 // adapter re-exports — kept here for the live signature.
 void NextRequest;
+
+// ============================================================================
+// Helpers (T-110 slice 2)
+// ============================================================================
+
+type TenantRepoContext =
+  | { ok: true; owner: string; repo: string; installationId: number }
+  | { ok: false; error: string; code: string };
+
+async function resolveTenantRepoContext(tenantId: string): Promise<TenantRepoContext> {
+  const supabase = getSupabaseAdmin();
+  const { data: tenant, error: tenantErr } = await supabase
+    .from("tenants")
+    .select("github_owner_login, github_repo_name, owner_user_id")
+    .eq("id", tenantId)
+    .maybeSingle<{ github_owner_login: string | null; github_repo_name: string | null; owner_user_id: string }>();
+  if (tenantErr) return { ok: false, error: tenantErr.message, code: "ERR_TENANT_LOOKUP" };
+  if (!tenant?.github_owner_login || !tenant.github_repo_name) {
+    return { ok: false, error: "Tenant has no GitHub repo (provisioning incomplete)", code: "ERR_TENANT_NO_REPO" };
+  }
+  const { data: integ, error: integErr } = await supabase
+    .from("owner_integrations")
+    .select("github_installation_id")
+    .eq("owner_user_id", tenant.owner_user_id)
+    .maybeSingle<{ github_installation_id: number | null }>();
+  if (integErr) return { ok: false, error: integErr.message, code: "ERR_INTEGRATIONS_LOOKUP" };
+  if (!integ?.github_installation_id) {
+    return { ok: false, error: "GitHub App installation_id missing on owner_integrations", code: "ERR_GITHUB_NOT_INSTALLED" };
+  }
+  return {
+    ok: true,
+    owner: tenant.github_owner_login,
+    repo: tenant.github_repo_name,
+    installationId: integ.github_installation_id,
+  };
+}
+
+function mcpToolError(id: string | number | null, error: unknown, correlationId: string): NextResponse {
+  if (error instanceof ContentNotFoundError) {
+    return NextResponse.json(err(id, -32004, error.message, { code: "ERR_CONTENT_NOT_FOUND", correlationId }), { status: 404, headers: mcpCorsHeaders });
+  }
+  if (error instanceof GithubInstallationTokenError) {
+    return NextResponse.json(err(id, -32000, error.message, { code: error.code, correlationId }), { status: error.status, headers: mcpCorsHeaders });
+  }
+  if (error instanceof ContentApiError) {
+    return NextResponse.json(err(id, -32000, error.message, { code: error.code, correlationId }), { status: error.status, headers: mcpCorsHeaders });
+  }
+  const message = error instanceof Error ? error.message : "Unknown tool error";
+  return NextResponse.json(err(id, -32000, message, { code: "ERR_TOOL_FAILED", correlationId }), { status: 500, headers: mcpCorsHeaders });
+}
