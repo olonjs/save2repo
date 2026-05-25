@@ -22,6 +22,7 @@ import { supabase } from "@/lib/supabase";
 import { DomainsPanel } from "@/app/dashboard/components/domains/DomainsPanel";
 import { LeadsPanel } from "@/app/dashboard/components/leads/LeadsPanel";
 import { AgentsPanel } from "@/app/dashboard/components/agents/AgentsPanel";
+import { SettingsPanel } from "@/app/dashboard/components/settings/SettingsPanel";
 import type { TenantRow } from "@/types/database";
 
 // ----------------------------------------------------------------------------
@@ -57,7 +58,7 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ size?: number 
   { id: "domains", label: "Domains", icon: Globe, ready: true },
   { id: "leads", label: "Leads", icon: AlertCircle, ready: true },
   { id: "agents", label: "Agents", icon: Plug, ready: true },
-  { id: "settings", label: "Settings", icon: KeyRound, ready: false, placeholder: "Settings tab lands with T-116 (rename / rotate keypair / delete)." },
+  { id: "settings", label: "Settings", icon: KeyRound, ready: true },
 ];
 
 function isTab(value: string | null): value is Tab {
@@ -148,6 +149,8 @@ export default function TenantDetailPage() {
           <LeadsPanel tenantId={tenant.id} />
         ) : activeTab === "agents" ? (
           <AgentsPanel tenantId={tenant.id} tenantSlug={tenant.slug} />
+        ) : activeTab === "settings" ? (
+          <SettingsPanel tenant={tenant} />
         ) : (
           <PlaceholderTab tab={activeTab} />
         )}
