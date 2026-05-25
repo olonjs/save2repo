@@ -115,9 +115,9 @@ async function handle(req: NextRequest): Promise<NextResponse> {
   const supabaseAdmin = getSupabaseAdmin();
   const { data: tenant, error: tenantError } = await supabaseAdmin
     .from("tenants")
-    .select("id,slug,name,owner_id,created_at")
+    .select("id,slug,display_name,owner_user_id,created_at")
     .eq("id", credential.tenant_id)
-    .maybeSingle<{ id: string; slug: string; name: string; owner_id: string; created_at: string }>();
+    .maybeSingle<{ id: string; slug: string; display_name: string | null; owner_user_id: string; created_at: string }>();
 
   return NextResponse.json(
     {
@@ -139,8 +139,8 @@ async function handle(req: NextRequest): Promise<NextResponse> {
           ? {
               id: tenant.id,
               slug: tenant.slug,
-              name: tenant.name,
-              ownerId: tenant.owner_id,
+              name: tenant.display_name ?? tenant.slug,
+              ownerId: tenant.owner_user_id,
               createdAt: tenant.created_at,
             }
           : null,

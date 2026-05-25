@@ -52,13 +52,13 @@ export async function GET(req: NextRequest) {
   const supabaseAdmin = getSupabaseAdmin();
   const { data: tenant, error: tenantError } = await supabaseAdmin
     .from("tenants")
-    .select("id,owner_id")
+    .select("id,owner_user_id")
     .eq("id", credential.tenant_id)
-    .maybeSingle<{ id: string; owner_id: string }>();
+    .maybeSingle<{ id: string; owner_user_id: string }>();
   if (tenantError || !tenant?.id) {
     return NextResponse.json({ error: "invalid_client", error_description: "tenant not found for client" }, { status: 401 });
   }
-  if (tenant.owner_id !== user.id) {
+  if (tenant.owner_user_id !== user.id) {
     return NextResponse.json({ error: "access_denied", error_description: "user cannot authorize this tenant client" }, { status: 403 });
   }
 

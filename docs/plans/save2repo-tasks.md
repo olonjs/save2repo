@@ -130,6 +130,32 @@ RLS: tutte le tabelle owner-only (`USING (auth.uid() = owner_user_id)`).
 **Files:** `src/lib/serverAuth.ts`; ~5-10 consumer route
 **Scope:** M
 
+### T-006.b: DB-UI types alignment (gap del plan, scoperto durante T-105 smoke)
+**Description:** il plan originale non aveva un task per il **drift sistemico** tra schema DB save2repo e codice TS forkato dal parent. Il fork porta type definitions + query inline con i nomi colonna del parent (`owner_id`, `github_repo_owner`, `api_key`, `name`, `preview_*`) che NON matchano lo schema baseline T-005 (`owner_user_id`, `github_owner_login`, `display_name`, no `api_key` su tenants — MCP credentials in `tenant_agent_credentials`, no `preview_*` — no content store per ADR-005). Sintomo runtime: "Project not found" su tenant esistenti, query che ritornano null silenziosamente.
+
+**Fix shippato:**
+1. `src/types/database.ts` — Database types generati da Supabase MCP (`generate_typescript_types`) come SOT condivisa.
+2. Refactor di ogni reference parent column trovata via grep (`owner_id`, `github_repo_owner`, `api_key`, `name` su tenants, `preview_*`):
+   - `src/app/dashboard/page.tsx` — Tenant prop type → schema-aligned; `github_owner_login` + `display_name` + remove `preview_*`.
+   - `src/app/dashboard/[id]/page.tsx` — Tenant interface allineato (parent columns rinominati, `api_key` rimosso); fetch `.eq("owner_user_id")`; render usa `github_owner_login`. **NB:** tabs Snapshot/Leads/Billing del file restano stale parent (chiamano route rimosse in T-003/T-004) — cleanup è follow-up sotto.
+   - `src/app/authorize/route.ts` — `owner_id` → `owner_user_id` (3 ref).
+   - `src/app/api/v1/agents/whoami/route.ts` — colonne rinominate; `name` → `display_name` (fallback `?? slug` nella response).
+   - `src/lib/saveRepoCommitDeploy.ts` — `github_repo_owner` → `github_owner_login` (3 ref). NB: file ancora usato da `mcpGatewayHandler.ts` (T-110), refactor finale lì.
+   - `src/lib/mcpGatewayAuth.ts` — rimosso `api_key` dal fetch + dal type `McpGatewayTenantContext.tenant`. Nessun consumer leggeva `tenant.api_key`; il "secret" è già il `credential.client_secret_hash` lato credential.
+   - `src/app/api/v1/a2a/t/[tenant]/route.ts` — `resolveTenantBySlug` non legge più `api_key`; A2A è public per design.
+
+**Acceptance:**
+- [x] tsc clean (`rm -rf .next && tsc --noEmit` 0 errori)
+- [x] click su tenant esistente nella dashboard → overview carica, no "Progetto non trovato"
+- [x] zero ref grep di `\bowner_id\b|github_repo_owner|api_key\b` nei file fixati
+
+**Follow-up esplicito:**
+- `dashboard/[id]/page.tsx` mantiene i tabs Snapshot/Leads/Billing che chiamano `/api/v1/tenants/[id]/save2edge-snapshot`, `/api/v1/tenants/[id]/leads/*`, `/api/v1/licensing/*` (route rimosse). Clic su quei tab → fetch 404. Strip dei tab out-of-scope ADR-003/ADR-005 è task separato (T-1xx) o parte di T-110 quando si introduce il tab Agents.
+
+**Dependencies:** T-005 (schema baseline), T-006 (assertOwner)
+**Files:** `src/types/database.ts` (nuovo); patch ai 7 file sopra
+**Scope:** S (~80 righe diff, additive + rename)
+
 ### T-007: Setup CI minimo
 **Description:** crea `.github/workflows/ci.yml` con job che esegue `npm ci`, `npx tsc --noEmit`, `npm run lint`, `npm run build` su push/PR. Segreti minimi (`SUPABASE_URL`, `SUPABASE_ANON_KEY` test) iniettati come env.
 **Acceptance:**

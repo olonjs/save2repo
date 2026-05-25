@@ -29,13 +29,16 @@ const A2A_TOOLS = [
 ];
 
 async function resolveTenantBySlug(slug: string) {
+  // save2repo schema: tenants has no `api_key` column; A2A endpoint is
+  // unauthenticated by design (public read-content / submit-form). Tenant
+  // resolution returns just identity.
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("tenants")
-    .select("id,slug,api_key")
+    .select("id,slug")
     .eq("slug", slug)
-    .maybeSingle<{ id: string; slug: string; api_key: string }>();
-  if (error || !data?.id || !data.api_key) return null;
+    .maybeSingle<{ id: string; slug: string }>();
+  if (error || !data?.id) return null;
   return data;
 }
 

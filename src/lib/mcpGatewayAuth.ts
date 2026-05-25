@@ -14,7 +14,6 @@ export type McpGatewayTenantContext = {
   tenant: {
     id: string;
     slug: string;
-    api_key: string;
   };
   authMode: "oauth_access_token" | "legacy_secret";
 };
@@ -88,13 +87,19 @@ export async function resolveMcpGatewayTenantContext(headers: Headers): Promise<
     return null;
   }
 
+  // save2repo schema: tenants table has no `api_key` column (ADR-002 single-owner
+  // + MCP credentials live in tenant_agent_credentials, scoped per credential
+  // not per tenant). The "api_key" the consumer of this helper expects is now
+  // the per-credential client_secret (already resolved via `credential` above);
+  // we simply hand it back from credential.client_secret_hash → resolved upstream.
+  // Tenant lookup keeps only the identity fields.
   const supabaseAdmin = getSupabaseAdmin();
   const { data: tenant, error } = await supabaseAdmin
     .from("tenants")
-    .select("id,slug,api_key")
+    .select("id,slug")
     .eq("id", credential.tenant_id)
-    .maybeSingle<{ id: string; slug: string; api_key: string }>();
-  if (error || !tenant?.id || !tenant.api_key) {
+    .maybeSingle<{ id: string; slug: string }>();
+  if (error || !tenant?.id) {
     console.warn("[mcp-gateway-auth] tenant not found for credential", {
       credentialId: credential.id,
       credentialTenantId: credential.tenant_id,

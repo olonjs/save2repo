@@ -27,16 +27,20 @@ import {
 
 interface Tenant {
   id: string;
+  // DB column: display_name (nullable). Parent code referenced `name`; we keep
+  // the local prop as a derived best-effort fallback to display_name ?? slug.
   name: string;
   slug: string;
-  vercel_url?: string;
-  vercel_public_url?: string;
-  github_repo_owner: string;
-  github_repo_name: string;
+  vercel_url?: string | null;
+  vercel_public_url?: string | null;
+  // DB columns: github_owner_login + github_repo_name (both nullable).
+  // Parent referenced github_repo_owner — renamed here to match the DB SOT
+  // (save2repo Supabase generated types in src/types/database.ts).
+  github_owner_login: string | null;
+  github_repo_name: string | null;
   github_installation_id?: string;
-  vercel_project_id?: string;
-  api_key?: string;
-  admin_private_key?: string;
+  vercel_project_id?: string | null;
+  admin_private_key?: string | null;
   status?: string;
   created_at?: string;
 }
@@ -180,14 +184,19 @@ export default function ProjectDetailPage() {
         .from("tenants")
         .select("*")
         .eq("id", id)
-        .eq("owner_id", user.id)
+        .eq("owner_user_id", user.id)
         .single();
       if (error || !data) {
         setTenant(null);
         setLoading(false);
         return;
       }
-      setTenant(data as Tenant);
+      // Map DB row (display_name nullable) → local Tenant prop (name string fallback to slug).
+      const row = data as Record<string, unknown>;
+      setTenant({
+        ...(row as object),
+        name: (typeof row.display_name === "string" ? row.display_name : null) ?? (typeof row.slug === "string" ? row.slug : ""),
+      } as Tenant);
       setLoading(false);
     };
     fetchTenant();
@@ -637,14 +646,14 @@ export default function ProjectDetailPage() {
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <a
-                  href={`https://github.com/${tenant.github_repo_owner}/${tenant.github_repo_name}`}
+                  href={`https://github.com/${tenant.github_owner_login}/${tenant.github_repo_name}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-mono text-sm text-primary-light hover:underline truncate"
                 >
-                  {tenant.github_repo_owner}/{tenant.github_repo_name}
+                  {tenant.github_owner_login}/{tenant.github_repo_name}
                 </a>
-                <CopyButton text={`${tenant.github_repo_owner}/${tenant.github_repo_name}`} size={14} />
+                <CopyButton text={`${tenant.github_owner_login}/${tenant.github_repo_name}`} size={14} />
               </div>
             </div>
             <div className="border border-border rounded-lg p-4">

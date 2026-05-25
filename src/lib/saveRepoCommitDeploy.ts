@@ -7,7 +7,7 @@ export type RepoFileForCommit = { path: string; content: unknown };
 export type TenantForRepoDeploy = {
   id: string;
   github_installation_id: string;
-  github_repo_owner: string;
+  github_owner_login: string;
   github_repo_name: string;
   vercel_project_id: string;
   unsynced_changes_count?: number | null;
@@ -132,7 +132,7 @@ export async function executeCommitBuildDeploy(params: {
       let existingSha: string | undefined;
       try {
         const current = await octokit.rest.repos.getContent({
-          owner: tenant.github_repo_owner,
+          owner: tenant.github_owner_login,
           repo: tenant.github_repo_name,
           path: file.path,
         });
@@ -144,7 +144,7 @@ export async function executeCommitBuildDeploy(params: {
       }
 
       const commitResponse = await octokit.rest.repos.createOrUpdateFileContents({
-        owner: tenant.github_repo_owner,
+        owner: tenant.github_owner_login,
         repo: tenant.github_repo_name,
         path: file.path,
         message: commitMessage,

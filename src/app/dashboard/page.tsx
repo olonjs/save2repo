@@ -25,16 +25,17 @@ import { CreateTenantModal } from "./components/CreateTenantModal";
 // statically by ProjectCard; no client-side refresh loop.
 // ----------------------------------------------------------------------------
 
+// Tenant prop shape — derived from DB schema (src/types/database.ts), narrowed
+// to the columns the dashboard list actually renders. display_name is the DB
+// SOT; the optional `name` fallback maps to display_name ?? slug.
 type Tenant = {
   id: string;
-  name?: string | null;
+  display_name?: string | null;
   slug: string;
-  github_repo_owner?: string | null;
+  github_owner_login?: string | null;
   github_repo_name?: string | null;
   vercel_url?: string | null;
   vercel_public_url?: string | null;
-  preview_image_url?: string | null;
-  preview_status?: "pending" | "ready" | "failed" | null;
 };
 
 export default function DashboardPage() {
@@ -85,17 +86,18 @@ export default function DashboardPage() {
           t.vercel_url ||
           (t.slug ? `https://${t.slug}.vercel.app` : "#");
         const repoLabel =
-          t.github_repo_owner && t.github_repo_name
-            ? `${t.github_repo_owner}/${t.github_repo_name}`
+          t.github_owner_login && t.github_repo_name
+            ? `${t.github_owner_login}/${t.github_repo_name}`
             : t.slug;
         return {
           id: t.id,
-          name: t.name ?? t.slug,
+          name: t.display_name ?? t.slug,
           slug: t.slug,
           publicUrl,
           repoLabel,
-          previewImageUrl: t.preview_image_url ?? null,
-          previewStatus: t.preview_status ?? null,
+          // Preview store not in scope for save2repo (no tenant_content_store, ADR-005).
+          previewImageUrl: null,
+          previewStatus: null,
           isLive: Boolean(t.vercel_url || t.vercel_public_url),
         };
       }),
